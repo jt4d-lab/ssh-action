@@ -267,11 +267,11 @@ composite action, который его распаковывает и запус
 - Create: `internal/config/config.go`
 - Create: `internal/config/config_test.go`
 
-- [ ] `go mod init github.com/jt4d-lab/ssh-action`, зафиксировать `easyssh-proxy` (точная версия), `x/crypto` и директиву `toolchain`
-- [ ] тесты: дефолты (`port` 22, `protocol` tcp, `username` root, `timeout` 30s, `command_timeout` 10m, `envs_format`), явные переопределения, невалидные `protocol`/`duration`/`port`
-- [ ] тесты: отсутствие всех кредов, `files` без `workdir`, `create_workdir` без `workdir`, пустой скрипт с `files` и без — по одному кейсу на каждое правило валидации
-- [ ] реализовать `Config` со всеми полями соединения, прокси, выполнения и новыми `workdir`/`create_workdir`/`files`, `FromEnv(lookup func(string) (string, bool))` с проверками из раздела «Валидация»
-- [ ] реализовать принимаемые имена `cipher`/`ciphers` (оба) и запустить `go test ./...` — зелёный до Task 2
+- [x] `go mod init github.com/jt4d-lab/ssh-action`, зафиксировать `easyssh-proxy` (точная версия), `x/crypto` и директиву `toolchain` (версии `easyssh-proxy`/`x/crypto` пинятся в Task 6 при первом импорте: Go 1.26 отклоняет неиспользуемые `require`)
+- [x] тесты: дефолты (`port` 22, `protocol` tcp, `username` root, `timeout` 30s, `command_timeout` 10m, `envs_format`), явные переопределения, невалидные `protocol`/`duration`/`port`
+- [x] тесты: отсутствие всех кредов, `files` без `workdir`, `create_workdir` без `workdir`, пустой скрипт с `files` и без — по одному кейсу на каждое правило валидации
+- [x] реализовать `Config` со всеми полями соединения, прокси, выполнения и новыми `workdir`/`create_workdir`/`files`, `FromEnv(lookup func(string) (string, bool))` с проверками из раздела «Валидация»
+- [x] реализовать принимаемые имена `cipher`/`ciphers` (оба) и запустить `go test ./...` — зелёный до Task 2
 
 ### Task 2: Список хостов и `host:port`
 
