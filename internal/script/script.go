@@ -93,7 +93,7 @@ func envExports(cfg *config.Config, env Env, warn io.Writer) []string {
 		value, ok := env.Lookup(name)
 		if !ok {
 			if warn != nil {
-				fmt.Fprintf(warn, "warning: env %s is not set, skipped\n", name)
+				_, _ = fmt.Fprintf(warn, "warning: env %s is not set, skipped\n", name)
 			}
 			continue
 		}

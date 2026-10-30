@@ -353,7 +353,7 @@ func ShellHandler() Handler {
 			return 1
 		}
 		if err != nil {
-			fmt.Fprintf(sess.Stderr, "sh: %v\n", err)
+			_, _ = fmt.Fprintf(sess.Stderr, "sh: %v\n", err)
 			return 1
 		}
 		return 0
@@ -367,10 +367,10 @@ func TarHandler(dir string) Handler {
 	return func(sess *Session) int {
 		extracted, err := extractTar(dir, sess.Stdin)
 		if err != nil {
-			fmt.Fprintf(sess.Stderr, "tar: %v\n", err)
+			_, _ = fmt.Fprintf(sess.Stderr, "tar: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(sess.Stdout, "extracted %d entries\n", extracted)
+		_, _ = fmt.Fprintf(sess.Stdout, "extracted %d entries\n", extracted)
 		return 0
 	}
 }
