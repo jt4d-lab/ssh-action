@@ -328,11 +328,11 @@ composite action, который его распаковывает и запус
 - Create: `internal/sshx/exec.go`
 - Create: `internal/sshx/exec_test.go`
 
-- [ ] тесты: успешный скрипт печатает stdout в stdout, stderr в stderr, построчно
-- [ ] реализовать `dial(cfg, host)` на `easyssh.MakeConfig.Connect()` с немедленным закрытием возвращённой сессии и передачей PTY только в нашу сессию скрипта
-- [ ] тесты: неверный пароль, несовпавший fingerprint, ненулевой удалённый exit status → ошибка с хостом и кодом
-- [ ] реализовать exec-цикл: `NewSession`, PTY по `request_pty`, `Start`, чтение stdout/stderr, дедлайн из раздела «Бюджет времени», классификация ошибок
-- [ ] тесты: `command_timeout` истёк → ошибка «command timeout» (а не «exit status»), клиент закрывается; запустить `go test ./...`
+- [x] тесты: успешный скрипт печатает stdout в stdout, stderr в stderr, построчно
+- [x] реализовать `dial(cfg, host)` на `easyssh.MakeConfig.Connect()` с немедленным закрытием возвращённой сессии и передачей PTY только в нашу сессию скрипта
+- [x] тесты: неверный пароль, несовпавший fingerprint, ненулевой удалённый exit status → ошибка с хостом и кодом
+- [x] реализовать exec-цикл: `NewSession`, PTY по `request_pty`, `Start`, чтение stdout/stderr, дедлайн из раздела «Бюджет времени», классификация ошибок
+- [x] тесты: `command_timeout` истёк → ошибка «command timeout» (а не «exit status»), клиент закрывается; запустить `go test ./...`
 
 ### Task 7: Копирование файлов на хост через tar
 
