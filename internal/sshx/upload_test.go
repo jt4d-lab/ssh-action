@@ -398,6 +398,36 @@ func TestUploadLongPath(t *testing.T) {
 	}
 }
 
+func TestUploadLargeFile(t *testing.T) {
+	local := t.TempDir()
+	payload := bytes.Repeat([]byte("ssh-action-large-file-payload\n"), 1<<18)
+	writeFile(t, filepath.Join(local, "release", "artifact.bin"), string(payload), 0o644)
+
+	hostDir := t.TempDir()
+	srv := startServer(t, sshtest.TarHandler(hostDir))
+	cfg, host := testTarget(t, srv.Addr(), testPassword)
+	client := connectTo(t, cfg, host)
+
+	entries, err := MatchFiles(filepath.Join(local, "release"), nil)
+	if err != nil {
+		t.Fatalf("MatchFiles: %v", err)
+	}
+	if err := upload(client, host, "/srv/release", entries, time.Now().Add(testDeadline), io.Discard, io.Discard); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(hostDir, "release", "artifact.bin"))
+	if err != nil {
+		t.Fatalf("read artifact.bin: %v", err)
+	}
+	if len(got) != len(payload) {
+		t.Fatalf("artifact.bin is %d bytes, want %d", len(got), len(payload))
+	}
+	if !bytes.Equal(got, payload) {
+		t.Error("artifact.bin differs from the local payload")
+	}
+}
+
 func TestUploadTarFailure(t *testing.T) {
 	local := localTree(t)
 	rec := &recorder{}

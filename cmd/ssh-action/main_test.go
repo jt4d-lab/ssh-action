@@ -117,6 +117,71 @@ func TestRunUnmatchedFilesIsConfigError(t *testing.T) {
 	}
 }
 
+func TestRunCopyConfigErrors(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		wantMsg string
+	}{
+		{
+			name:    "files without workdir",
+			vars:    map[string]string{"INPUT_FILES": "dist/*"},
+			wantMsg: "files requires workdir",
+		},
+		{
+			name:    "foreign home in workdir",
+			vars:    map[string]string{"INPUT_WORKDIR": "~bob/app"},
+			wantMsg: "only the current user home",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(nil, inputs(srv, tt.vars), &stdout, &stderr)
+			if code != exitConfig {
+				t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitConfig, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantMsg) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantMsg)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing on a broken configuration", stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunCapturesStdoutOfFailingCommand(t *testing.T) {
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, "before failure\n")
+		_, _ = io.WriteString(sess.Stderr, "remote warning\n")
+		return 7
+	})
+	path := t.TempDir() + "/stdout"
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{stdoutFileEnv: path}), &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "before failure\n") {
+		t.Errorf("stdout = %q, want the remote output to stay live", stdout.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != "before failure\n" {
+		t.Errorf("%s = %q, want the remote stdout only", path, data)
+	}
+	if !strings.Contains(stderr.String(), "remote warning\n") || !strings.Contains(stderr.String(), "status 7") {
+		t.Errorf("stderr = %q, want the remote stderr and the exit status", stderr.String())
+	}
+}
+
 func TestRunVersion(t *testing.T) {
 	original := version
 	version = "v1.2.3"

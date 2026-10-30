@@ -442,12 +442,12 @@ composite action, который его распаковывает и запус
 
 ### Task 15: Verify acceptance criteria
 
-- [ ] проверить, что все входы из Technical Details присутствуют в `action.yml` и доходят до `Config`
-- [ ] проверить, что в рантайме нет сетевых запросов: `grep -rn "curl\|wget\|https://" action/ Makefile action.yml`
-- [ ] `go test ./... -race` и `go vet ./...` зелёные; `sh tests/entrypoint_test.sh` и `sh tests/dist_test.sh` зелёные
-- [ ] проверить коды выхода `0`/`1`/`2` на реальных сценариях, включая `files` без `workdir` и `~user` в `workdir`
-- [ ] проверить сценарии: большой файл, путь с пробелом, `request_pty` + `files`, падающая команда с `capture_stdout`
-- [ ] убедиться, что `dist/` соответствует текущему исходнику (версия и checksums)
+- [x] проверить, что все входы из Technical Details присутствуют в `action.yml` и доходят до `Config`
+- [x] проверить, что в рантайме нет сетевых запросов: `grep -rn "curl\|wget\|https://" action/ Makefile action.yml`
+- [x] `go test ./... -race` и `go vet ./...` зелёные; `sh tests/entrypoint_test.sh` и `sh tests/dist_test.sh` зелёные
+- [x] проверить коды выхода `0`/`1`/`2` на реальных сценариях, включая `files` без `workdir` и `~user` в `workdir`
+- [x] проверить сценарии: большой файл, путь с пробелом, `request_pty` + `files`, падающая команда с `capture_stdout`
+- [x] убедиться, что `dist/` соответствует текущему исходнику (версия и checksums)
 
 ### Task 16: [Final] Обновить документацию и закрыть план
 
