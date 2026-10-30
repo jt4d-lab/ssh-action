@@ -227,6 +227,86 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// redactedSecret replaces every credential of a DebugDump.
+const redactedSecret = "[REDACTED]"
+
+// DebugDump renders c for the debug input: credentials are replaced by
+// [REDACTED], envs appear as the list of names they are (Config never holds
+// their values), and files and script are shown verbatim.
+func (c *Config) DebugDump() string {
+	fields := []struct{ name, value string }{
+		{"host", c.Host},
+		{"port", c.Port},
+		{"protocol", c.Protocol},
+		{"username", c.Username},
+		{"password", redacted(c.Password)},
+		{"key", redacted(c.Key)},
+		{"key_path", c.KeyPath},
+		{"passphrase", redacted(c.Passphrase)},
+		{"fingerprint", c.Fingerprint},
+		{"cipher", strings.Join(c.Ciphers, ",")},
+		{"use_insecure_cipher", strconv.FormatBool(c.UseInsecureCipher)},
+		{"timeout", c.Timeout.String()},
+		{"sync", strconv.FormatBool(c.Sync)},
+		{"proxy_host", c.Proxy.Host},
+		{"proxy_port", c.Proxy.Port},
+		{"proxy_protocol", c.Proxy.Protocol},
+		{"proxy_username", c.Proxy.Username},
+		{"proxy_password", redacted(c.Proxy.Password)},
+		{"proxy_key", redacted(c.Proxy.Key)},
+		{"proxy_key_path", c.Proxy.KeyPath},
+		{"proxy_passphrase", redacted(c.Proxy.Passphrase)},
+		{"proxy_fingerprint", c.Proxy.Fingerprint},
+		{"proxy_cipher", strings.Join(c.Proxy.Ciphers, ",")},
+		{"proxy_use_insecure_cipher", strconv.FormatBool(c.Proxy.UseInsecureCipher)},
+		{"proxy_timeout", c.Proxy.Timeout.String()},
+		{"script_path", c.ScriptPath},
+		{"script_stop", strconv.FormatBool(c.ScriptStop)},
+		{"command_timeout", c.CommandTimeout.String()},
+		{"envs", c.Envs},
+		{"envs_format", c.EnvsFormat},
+		{"allenvs", strconv.FormatBool(c.AllEnvs)},
+		{"request_pty", strconv.FormatBool(c.RequestPty)},
+		{"capture_stdout", strconv.FormatBool(c.CaptureStdout)},
+		{"debug", strconv.FormatBool(c.Debug)},
+		{"workdir", c.Workdir},
+		{"create_workdir", strconv.FormatBool(c.CreateWorkdir)},
+	}
+
+	var b strings.Builder
+	b.WriteString("ssh-action configuration:\n")
+	for _, f := range fields {
+		_, _ = fmt.Fprintf(&b, "  %s: %s\n", f.name, f.value)
+	}
+	writeBlock(&b, "files", c.Files)
+	writeBlock(&b, "script", c.Script)
+	return b.String()
+}
+
+// writeBlock appends value under name as an indented block, one line per entry.
+func writeBlock(b *strings.Builder, name, value string) {
+	var lines []string
+	for _, line := range strings.Split(value, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(b, "  %s:\n", name)
+	for _, line := range lines {
+		_, _ = fmt.Fprintf(b, "    %s\n", line)
+	}
+}
+
+func redacted(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	return redactedSecret
+}
+
 func hasHost(list string) bool {
 	for _, host := range strings.Split(list, ",") {
 		if strings.TrimSpace(host) != "" {

@@ -366,11 +366,11 @@ composite action, который его распаковывает и запус
 - Create: `cmd/ssh-action/main_test.go`
 - Modify: `internal/config/config.go`
 
-- [ ] тесты: коды `0`/`1`/`2` (успех, ошибка исполнения или копирования, битая конфигурация), `--version` печатает версию из ldflags
-- [ ] реализовать `run(args, lookup, stdout, stderr) int` с флагами поверх env для локальной отладки
-- [ ] тесты: `debug` не печатает `key`/`password`/`passphrase` и значения env, но печатает имена и список `files`
-- [ ] реализовать redacted-дамп конфигурации, дублирование удалённого stdout в `SSH_ACTION_STDOUT_FILE`
-- [ ] реализовать финальную строку-итог и служебные сообщения в stderr; запустить `go test ./...`
+- [x] тесты: коды `0`/`1`/`2` (успех, ошибка исполнения или копирования, битая конфигурация), `--version` печатает версию из ldflags
+- [x] реализовать `run(args, lookup, stdout, stderr) int` с флагами поверх env для локальной отладки
+- [x] тесты: `debug` не печатает `key`/`password`/`passphrase` и значения env, но печатает имена и список `files`
+- [x] реализовать redacted-дамп конфигурации, дублирование удалённого stdout в `SSH_ACTION_STDOUT_FILE`
+- [x] реализовать финальную строку-итог и служебные сообщения в stderr; запустить `go test ./...`
 
 ### Task 10: Composite action, `entrypoint.sh` и `make dist`
 

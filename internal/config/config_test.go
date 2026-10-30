@@ -332,3 +332,63 @@ func TestValidateDirect(t *testing.T) {
 		t.Errorf("Validate(empty) = %v, want ErrInvalidConfig", err)
 	}
 }
+
+func TestDebugDumpRedactsCredentials(t *testing.T) {
+	cfg := &config.Config{
+		Host:        "example.com",
+		Port:        "22",
+		Protocol:    "tcp",
+		Username:    "deploy",
+		Password:    "hunter2-password",
+		Key:         "PRIVATE-KEY-MATERIAL",
+		KeyPath:     "/home/deploy/.ssh/id_ed25519",
+		Passphrase:  "key-passphrase",
+		Fingerprint: "SHA256:abc",
+		Timeout:     30 * time.Second,
+		Proxy: config.Proxy{
+			Host:       "jump.example.com",
+			Port:       "22",
+			Protocol:   "tcp",
+			Username:   "jump",
+			Password:   "proxy-password",
+			Key:        "PROXY-KEY-MATERIAL",
+			Passphrase: "proxy-passphrase",
+			Timeout:    30 * time.Second,
+		},
+		Script:         "deploy.sh --now",
+		CommandTimeout: time.Minute,
+		Envs:           "TOKEN,API_KEY",
+		EnvsFormat:     "export {NAME}={VALUE}",
+		Workdir:        "/srv/app",
+		CreateWorkdir:  true,
+		Files:          "dist/*\nbin/tool",
+	}
+
+	dump := cfg.DebugDump()
+	for _, secret := range []string{
+		"hunter2-password", "PRIVATE-KEY-MATERIAL", "key-passphrase",
+		"proxy-password", "PROXY-KEY-MATERIAL", "proxy-passphrase",
+	} {
+		if strings.Contains(dump, secret) {
+			t.Errorf("dump leaks %q:\n%s", secret, dump)
+		}
+	}
+	for _, want := range []string{
+		"example.com",
+		"password: [REDACTED]",
+		"key: [REDACTED]",
+		"passphrase: [REDACTED]",
+		"proxy_password: [REDACTED]",
+		"proxy_key: [REDACTED]",
+		"proxy_passphrase: [REDACTED]",
+		"envs: TOKEN,API_KEY",
+		"workdir: /srv/app",
+		"dist/*",
+		"bin/tool",
+		"deploy.sh --now",
+	} {
+		if !strings.Contains(dump, want) {
+			t.Errorf("dump lacks %q:\n%s", want, dump)
+		}
+	}
+}
