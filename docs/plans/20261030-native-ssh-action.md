@@ -392,11 +392,11 @@ composite action, который его распаковывает и запус
 **Files:**
 - Create: `dist/linux-amd64.gz`, `dist/linux-arm64.gz`, `dist/checksums.txt`
 
-- [ ] `make dist` и коммит артефактов: без этого шага Task 12 и e2e запускать нечего
-- [ ] `tests/dist_test.sh`: распакованный бинарь печатает версию из `VER`, `ldd` подтверждает статическую сборку
-- [ ] проверить, что `dist/checksums.txt` соответствует файлам (`sha256sum -c` в `tests/dist_test.sh`)
-- [ ] зафиксировать в `Makefile` цель `release-check` (пересборка + сверка checksums) — используется в Task 13
-- [ ] запустить `sh tests/dist_test.sh`; при любой последующей правке исходников пересобрать `dist/`
+- [x] `make dist` и коммит артефактов: без этого шага Task 12 и e2e запускать нечего
+- [x] `tests/dist_test.sh`: распакованный бинарь печатает версию из `VER`, `ldd` подтверждает статическую сборку
+- [x] проверить, что `dist/checksums.txt` соответствует файлам (`sha256sum -c` в `tests/dist_test.sh`)
+- [x] зафиксировать в `Makefile` цель `release-check` (пересборка + сверка checksums) — используется в Task 13
+- [x] запустить `sh tests/dist_test.sh`; при любой последующей правке исходников пересобрать `dist/`
 
 ### Task 12: E2E action'а в двух форжах
 
