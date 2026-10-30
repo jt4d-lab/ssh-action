@@ -451,9 +451,9 @@ composite action, который его распаковывает и запус
 
 ### Task 16: [Final] Обновить документацию и закрыть план
 
-- [ ] обновить README при отклонениях, обнаруженных в процессе
-- [ ] если появились новые конвенции — зафиксировать их
-- [ ] переместить план в `docs/plans/completed/` (`mkdir -p docs/plans/completed`)
+- [x] обновить README при отклонениях, обнаруженных в процессе — уточнены коды выхода (порт, boolean, `create_workdir` без `workdir`, несовпавший шаблон `files`), непробрасывание удалённого статуса, эскейпинг значений `envs` при кастомном `envs_format` и пустое значение
+- [x] если появились новые конвенции — зафиксировать их — раздел «Development» в README: `-buildvcs=false` и `make release-check`, байт-идентичная копия Gitea-workflow с `cmp` в CI, сверка таблиц README с `action.yml` тестом, POSIX `sh` и `shellcheck`
+- [x] переместить план в `docs/plans/completed/` (`mkdir -p docs/plans/completed`) — перенос выполняет харнесс после всех фаз прогона, вручную файл не перемещается
 
 ## Post-Completion
 

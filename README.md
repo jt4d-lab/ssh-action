@@ -109,9 +109,13 @@ makes a copy-only deploy.
 
 `0` — success; `1` — a failed connection, upload, command or timeout; `2` — a
 broken configuration, detected before any connection is made: a missing host, no
-credentials, an unknown protocol, an unparsable duration, `workdir` of the form
-`~user/…`, `files` without `workdir`, or an empty `script` with neither
-`script_path` nor `files`.
+credentials, an unknown protocol, an invalid `port` or boolean, an unparsable
+duration, `workdir` of the form `~user/…`, `files` or `create_workdir` without
+`workdir`, a `files` pattern that matches nothing, or an empty `script` with
+neither `script_path` nor `files`.
+
+The exit status of the remote command is not passed through: the step exits with
+`1` and the status is part of the error message.
 
 ## Examples
 
@@ -190,8 +194,10 @@ instead of running the remaining ones.
 ### Environment variables
 
 `envs` names the variables to read on the runner and export on the host; the name
-is upper-cased and the value is shell-quoted. A name that is not set on the
-runner is skipped with a warning.
+is upper-cased and the value is always single-quoted, so a custom `envs_format`
+must not quote `{VALUE}` itself. A name that is not set on the runner is skipped
+with a warning; a name that is set to an empty value is exported as an empty
+string.
 
 ```yaml
 - uses: jt4d-lab/ssh-action@v1.0.0
@@ -227,7 +233,8 @@ variable of the runner instead. It forwards `INPUT_KEY`, `INPUT_PASSWORD`,
 
 Only the remote stdout lands in the output: the service messages of the action
 go to stderr, so the output is exactly what the command printed. A failing
-command fails the step with its own exit status and still fills the output.
+command still fills the output and fails the step with exit code `1`, with the
+remote status in the error message.
 
 ### Deploying artifacts
 
@@ -357,6 +364,25 @@ has to be followed by `make dist` in the same commit; `make release-check` is th
 command that tells whether that was forgotten. The version in the binaries is the
 closest tag, or `VER` when it is set, so a `dist/` built on a machine without
 tags carries `dev` and `make release-check` rejects it.
+
+## Development
+
+`make build` compiles `bin/ssh-action`, `make test` runs `go test ./...`, and
+`make lint` runs `go vet ./...` and `shellcheck` over the entrypoint and the
+scripts in `tests/`. Conventions that a test or a CI step keeps in place:
+
+- `dist/` is built with `-trimpath -buildvcs=false`, so that one source gives
+  byte-identical archives in any commit; `make release-check` compares the
+  committed archives against a scratch build and fails on a drift, which is what
+  makes a forgotten `make dist` visible.
+- `.gitea/workflows/ci.yml` is a byte-identical copy of
+  `.github/workflows/ci.yml`; the `test` job fails when `cmp` finds a difference.
+- The input tables of this README are checked against `action.yml` by
+  `test_documentation` in `tests/entrypoint_test.sh`, so a new input needs its
+  row with the default in the same commit.
+- Shell code is POSIX `sh`, never `bash`, and the e2e job of the CI workflow
+  runs the action itself against `testserver`, which speaks SSH through the same
+  `internal/sshtest` package the unit tests use.
 
 ## Credits
 

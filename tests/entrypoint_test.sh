@@ -1,9 +1,9 @@
 #!/bin/sh
 # Tests of action/entrypoint.sh: architecture selection, unpacking of the dist
 # archive, the capture_stdout output, the input mapping of action.yml and the
-# inputs and defaults README.md documents. Every case builds a throwaway copy of
-# the action tree, so the committed dist archive is not needed and nothing
-# touches the repository.
+# documentation README.md carries. Every case builds a throwaway copy of the
+# action tree, so the committed dist archive is not needed and nothing touches
+# the repository.
 set -eu
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -286,6 +286,8 @@ test_documentation() {
 	check_contains "README: dropped curl_insecure input" "$readme" "curl_insecure"
 	check_contains "README: files does not expand **" "$readme" '`**` is not supported'
 	check_contains "README: allenvs forwards GITHUB_TOKEN" "$readme" "GITHUB_TOKEN"
+	check_contains "README: development conventions" "$readme" "## Development"
+	check_contains "README: reproducible dist build" "$readme" "-buildvcs=false"
 
 	check_contains "LICENSE: MIT" "$repo_dir/LICENSE" "MIT License"
 	check_contains "LICENSE: easyssh-proxy attribution" "$repo_dir/LICENSE" "easyssh-proxy"
