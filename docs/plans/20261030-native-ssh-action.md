@@ -402,14 +402,17 @@ composite action, который его распаковывает и запус
 
 **Files:**
 - Create: `testserver/main.go`
+- Create: `testserver/main_test.go`
 - Create: `.github/workflows/ci.yml`
 - Create: `.gitea/workflows/ci.yml`
+- Modify: `Makefile`, `dist/linux-amd64.gz`, `dist/linux-arm64.gz`, `dist/checksums.txt`
 
-- [ ] `testserver/main.go`: запуск `sshtest` с флагами (адрес, пароль, ключ, jump-хост, настоящий `sh`/`tar`), печать host key
-- [ ] workflow: job `go test ./...` + `go vet` + `shellcheck` + `make release-check`
-- [ ] workflow: e2e с `uses: ./` — password, key, fingerprint, proxy через jump, `capture_stdout` (включая падающую команду), `script_stop`, multi-host на двух портах
-- [ ] workflow: e2e `workdir`/`create_workdir`/`files` — копирование каталога и файла по glob, проверка содержимого и режимов на хосте, запуск скрипта уже в `workdir`, каталог с пробелом в пути
-- [ ] скопировать workflow в `.gitea/workflows/ci.yml` (один канонический файл, копия без расхождений) и зафиксировать требование к раннеру: linux, `sh`, `gzip`, `tar` на хосте, без docker и node
+- [x] `testserver/main.go`: запуск `sshtest` с флагами (адрес, пароль, ключ, jump-хост, настоящий `sh`/`tar`), печать host key
+- [x] workflow: job `go test ./...` + `go vet` + `shellcheck` + `make release-check`
+- [x] workflow: e2e с `uses: ./` — password, key, fingerprint, proxy через jump, `capture_stdout` (включая падающую команду), `script_stop`, multi-host на двух портах
+- [x] workflow: e2e `workdir`/`create_workdir`/`files` — копирование каталога и файла по glob, проверка содержимого и режимов на хосте, запуск скрипта уже в `workdir`, каталог с пробелом в пути
+- [x] скопировать workflow в `.gitea/workflows/ci.yml` (один канонический файл, копия без расхождений) и зафиксировать требование к раннеру: linux, `sh`, `gzip`, `tar` на хосте, без docker и node
+- [x] `-buildvcs=false` в `make build`/`make dist` и пересборка `dist/`: VCS-stamping делал бинарь другим на каждом коммите, из-за чего `make release-check` из job'а CI падал всегда
 
 ### Task 13: Релизный workflow
 

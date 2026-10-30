@@ -1,6 +1,9 @@
 # Version baked into the binary: the closest git tag, or "dev" outside a tag.
 VER ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 LDFLAGS = -s -w -X main.version=$(VER)
+# -buildvcs=false keeps a build byte identical to a build of the same source in
+# another commit, which is what release-check compares against dist/.
+BUILD_FLAGS = -trimpath -buildvcs=false
 ARCHES = amd64 arm64
 # DIST_DIR lets release-check build the same artifacts outside dist/.
 DIST_DIR ?= dist
@@ -8,7 +11,7 @@ DIST_DIR ?= dist
 .PHONY: build test lint dist release-check
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ssh-action ./cmd/ssh-action
+	CGO_ENABLED=0 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o bin/ssh-action ./cmd/ssh-action
 
 test:
 	go test ./...
@@ -22,7 +25,7 @@ dist:
 	mkdir -p $(DIST_DIR)
 	@for arch in $(ARCHES); do \
 		echo "building linux/$$arch $(VER)"; \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/linux-$$arch ./cmd/ssh-action || exit 1; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/linux-$$arch ./cmd/ssh-action || exit 1; \
 		gzip -9n -c $(DIST_DIR)/linux-$$arch >$(DIST_DIR)/linux-$$arch.gz || exit 1; \
 		rm -f $(DIST_DIR)/linux-$$arch; \
 	done
