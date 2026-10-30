@@ -381,11 +381,11 @@ composite action, который его распаковывает и запус
 - Create: `Makefile`
 - Create: `tests/entrypoint_test.sh`
 
-- [ ] `action.yml`: все входы/дефолты/описания (включая `workdir`, `create_workdir`, `files`), выход `stdout`, один шаг с `shell: sh`, маппинг в `INPUT_*`
-- [ ] `tests/entrypoint_test.sh`: арка `amd64`/`arm64`, неизвестная арка → код 2, распаковка gz, повторный запуск не перераспаковывает, путь собирается без неинициализированных переменных
-- [ ] `tests/entrypoint_test.sh`: `capture_stdout` — выход в `GITHUB_OUTPUT` между случайными разделителями, файл удаляется, код возврата бинаря сохраняется (падающая команда → шаг падает)
-- [ ] реализовать `entrypoint.sh` на POSIX sh (`set -eu`): арка, распаковка в `RUNNER_TEMP`, `exec`, `capture_stdout` по разделу «`capture_stdout` и код возврата»
-- [ ] `Makefile`: `build`, `test`, `lint`, `dist` (`CGO_ENABLED=0`, две арки, `gzip -9n`, `dist/checksums.txt`); `sh tests/entrypoint_test.sh` + `shellcheck` + `go test ./...` зелёные
+- [x] `action.yml`: все входы/дефолты/описания (включая `workdir`, `create_workdir`, `files`), выход `stdout`, один шаг с `shell: sh`, маппинг в `INPUT_*`
+- [x] `tests/entrypoint_test.sh`: арка `amd64`/`arm64`, неизвестная арка → код 2, распаковка gz, повторный запуск не перераспаковывает, путь собирается без неинициализированных переменных
+- [x] `tests/entrypoint_test.sh`: `capture_stdout` — выход в `GITHUB_OUTPUT` между случайными разделителями, файл удаляется, код возврата бинаря сохраняется (падающая команда → шаг падает)
+- [x] реализовать `entrypoint.sh` на POSIX sh (`set -eu`): арка, распаковка в `RUNNER_TEMP`, `exec`, `capture_stdout` по разделу «`capture_stdout` и код возврата»
+- [x] `Makefile`: `build`, `test`, `lint`, `dist` (`CGO_ENABLED=0`, две арки, `gzip -9n`, `dist/checksums.txt`); `sh tests/entrypoint_test.sh` + `shellcheck` + `go test ./...` зелёные
 
 ### Task 11: Собрать и закоммитить `dist/`
 

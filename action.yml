@@ -1,0 +1,157 @@
+name: SSH Action
+description: Run a script and copy local files to remote hosts over SSH, with no download at runtime.
+
+inputs:
+  host:
+    description: Comma separated host list; each host may carry its own port as host:port.
+    required: true
+  port:
+    description: SSH port of the hosts that have no port of their own.
+    default: "22"
+  protocol:
+    description: Network protocol, one of tcp, tcp4 or tcp6.
+    default: tcp
+  username:
+    description: User to log in as.
+    default: root
+  password:
+    description: Password of the user. Use instead of key or key_path to authenticate.
+  key:
+    description: Private key content. Use instead of password to authenticate.
+  key_path:
+    description: Path of a private key file. Use instead of password to authenticate.
+  passphrase:
+    description: Passphrase of the private key.
+  fingerprint:
+    description: Expected SHA256 fingerprint of the host key.
+  timeout:
+    description: SSH handshake timeout.
+    default: 30s
+  cipher:
+    description: Comma separated SSH ciphers, the same as ciphers.
+  ciphers:
+    description: Comma separated SSH ciphers, the same as cipher.
+  use_insecure_cipher:
+    description: Allow the insecure ciphers of the SSH library.
+    default: "false"
+  sync:
+    description: Run the hosts one after another and stop on the first failure instead of running them in parallel.
+    default: "false"
+
+  proxy_host:
+    description: Jump host address; every target host is reached through it.
+  proxy_port:
+    description: SSH port of the jump host.
+    default: "22"
+  proxy_protocol:
+    description: Network protocol of the jump host, one of tcp, tcp4 or tcp6.
+    default: tcp
+  proxy_username:
+    description: User to log in to the jump host as.
+  proxy_password:
+    description: Password of the jump host user.
+  proxy_key:
+    description: Private key content for the jump host.
+  proxy_key_path:
+    description: Path of a private key file for the jump host.
+  proxy_passphrase:
+    description: Passphrase of the jump host private key.
+  proxy_fingerprint:
+    description: Expected SHA256 fingerprint of the jump host key.
+  proxy_cipher:
+    description: Comma separated SSH ciphers of the jump host.
+  proxy_use_insecure_cipher:
+    description: Allow the insecure ciphers of the SSH library on the jump host.
+    default: "false"
+  proxy_timeout:
+    description: SSH handshake timeout of the jump host.
+    default: 30s
+
+  script:
+    description: Script to run on every host.
+  script_path:
+    description: Path of a local script file to run on every host, after script.
+  script_stop:
+    description: Stop the script on the first failing line and return its exit status.
+    default: "false"
+  command_timeout:
+    description: Time budget of a host, covering both the file upload and the script.
+    default: 10m
+  envs:
+    description: Comma separated names of environment variables to export on the host.
+  envs_format:
+    description: Format of one environment export, with {NAME} and {VALUE} placeholders.
+    default: "export {NAME}={VALUE}"
+  allenvs:
+    description: Export every DRONE_, PLUGIN_, INPUT_ and GITHUB_ variable of the runner on the host.
+    default: "false"
+  request_pty:
+    description: Request a pseudo terminal for the script.
+    default: "false"
+  debug:
+    description: Print the configuration with the credentials redacted.
+    default: "false"
+  capture_stdout:
+    description: Capture the remote stdout into the stdout output. The step fails with the exit status of the binary.
+    default: "false"
+
+  workdir:
+    description: Working directory on the host, an absolute path or ~/path.
+  create_workdir:
+    description: Create workdir before running the script.
+    default: "false"
+  files:
+    description: Local paths and glob patterns to copy into workdir, one per line. The directory is created even without create_workdir.
+
+outputs:
+  stdout:
+    description: Remote stdout of the script, filled only when capture_stdout is true.
+    value: ${{ steps.ssh.outputs.stdout }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run ssh-action
+      id: ssh
+      shell: sh
+      run: sh "${{ github.action_path }}/action/entrypoint.sh"
+      env:
+        INPUT_HOST: ${{ inputs.host }}
+        INPUT_PORT: ${{ inputs.port }}
+        INPUT_PROTOCOL: ${{ inputs.protocol }}
+        INPUT_USERNAME: ${{ inputs.username }}
+        INPUT_PASSWORD: ${{ inputs.password }}
+        INPUT_KEY: ${{ inputs.key }}
+        INPUT_KEY_PATH: ${{ inputs.key_path }}
+        INPUT_PASSPHRASE: ${{ inputs.passphrase }}
+        INPUT_FINGERPRINT: ${{ inputs.fingerprint }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_CIPHER: ${{ inputs.cipher }}
+        INPUT_CIPHERS: ${{ inputs.ciphers }}
+        INPUT_USE_INSECURE_CIPHER: ${{ inputs.use_insecure_cipher }}
+        INPUT_SYNC: ${{ inputs.sync }}
+        INPUT_PROXY_HOST: ${{ inputs.proxy_host }}
+        INPUT_PROXY_PORT: ${{ inputs.proxy_port }}
+        INPUT_PROXY_PROTOCOL: ${{ inputs.proxy_protocol }}
+        INPUT_PROXY_USERNAME: ${{ inputs.proxy_username }}
+        INPUT_PROXY_PASSWORD: ${{ inputs.proxy_password }}
+        INPUT_PROXY_KEY: ${{ inputs.proxy_key }}
+        INPUT_PROXY_KEY_PATH: ${{ inputs.proxy_key_path }}
+        INPUT_PROXY_PASSPHRASE: ${{ inputs.proxy_passphrase }}
+        INPUT_PROXY_FINGERPRINT: ${{ inputs.proxy_fingerprint }}
+        INPUT_PROXY_CIPHER: ${{ inputs.proxy_cipher }}
+        INPUT_PROXY_USE_INSECURE_CIPHER: ${{ inputs.proxy_use_insecure_cipher }}
+        INPUT_PROXY_TIMEOUT: ${{ inputs.proxy_timeout }}
+        INPUT_SCRIPT: ${{ inputs.script }}
+        INPUT_SCRIPT_PATH: ${{ inputs.script_path }}
+        INPUT_SCRIPT_STOP: ${{ inputs.script_stop }}
+        INPUT_COMMAND_TIMEOUT: ${{ inputs.command_timeout }}
+        INPUT_ENVS: ${{ inputs.envs }}
+        INPUT_ENVS_FORMAT: ${{ inputs.envs_format }}
+        INPUT_ALLENVS: ${{ inputs.allenvs }}
+        INPUT_REQUEST_PTY: ${{ inputs.request_pty }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_CAPTURE_STDOUT: ${{ inputs.capture_stdout }}
+        INPUT_WORKDIR: ${{ inputs.workdir }}
+        INPUT_CREATE_WORKDIR: ${{ inputs.create_workdir }}
+        INPUT_FILES: ${{ inputs.files }}
