@@ -51,6 +51,77 @@ func TestRunHostsInParallel(t *testing.T) {
 	}
 }
 
+// echoHandler records every session and writes its command to stdout.
+func echoHandler(rec *recorder) sshtest.Handler {
+	return func(sess *sshtest.Session) int {
+		rec.record(sess)
+		_, _ = io.WriteString(sess.Stdout, sess.Command+"\n")
+		return 0
+	}
+}
+
+// TestRunParallelReportsTheFirstHostError lets the second host fail before the
+// first one and pins that the returned error belongs to the first host in hosts
+// order and that both hosts ran their step.
+func TestRunParallelReportsTheFirstHostError(t *testing.T) {
+	started := make(chan struct{}, 1)
+	first := startServer(t, func(*sshtest.Session) int {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+		}
+		return 5
+	})
+	rec := &recorder{}
+	second := startServer(t, func(sess *sshtest.Session) int {
+		rec.record(sess)
+		started <- struct{}{}
+		return 3
+	})
+	cfg, hosts := multiHosts(t, first.Addr(), second.Addr())
+
+	var stdout, stderr bytes.Buffer
+	err := Run(cfg, hosts, "ignored", nil, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Run with a failing host succeeded")
+	}
+	for _, want := range []string{hostName(hosts[0]), "status 5"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if sessions := rec.all(); len(sessions) != 1 {
+		t.Errorf("the second host ran %d sessions, want it to finish its step", len(sessions))
+	}
+	if strings.Contains(stderr.String(), successLine) {
+		t.Errorf("stderr = %q, want no summary line after a failure", stderr.String())
+	}
+}
+
+func TestRunSyncRunsEveryHost(t *testing.T) {
+	firstRec, secondRec := &recorder{}, &recorder{}
+	first := startServer(t, echoHandler(firstRec))
+	second := startServer(t, echoHandler(secondRec))
+	cfg, hosts := multiHosts(t, first.Addr(), second.Addr())
+	cfg.Sync = true
+
+	var stdout, stderr bytes.Buffer
+	if err := Run(cfg, hosts, "echo synced", nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run: %v (stderr %q)", err, stderr.String())
+	}
+	for i, rec := range []*recorder{firstRec, secondRec} {
+		if sessions := rec.all(); len(sessions) != 1 {
+			t.Errorf("host %d ran %d sessions, want one script", i, len(sessions))
+		}
+	}
+	if got := strings.Count(stdout.String(), "synced\n"); got != 2 {
+		t.Errorf("stdout = %q, want both hosts to run the script", stdout.String())
+	}
+	if got := strings.Count(stderr.String(), successLine); got != 1 {
+		t.Errorf("summary line appears %d times in %q, want once", got, stderr.String())
+	}
+}
+
 func TestRunSyncStopsAtFirstFailure(t *testing.T) {
 	failing := startServer(t, func(*sshtest.Session) int { return 3 })
 	rec := &recorder{}
@@ -162,6 +233,29 @@ func TestRunUploadsBeforeScript(t *testing.T) {
 		}
 		if sessions[1].command != script {
 			t.Errorf("second session command = %q, want %q", sessions[1].command, script)
+		}
+	})
+
+	t.Run("every host receives the entries", func(t *testing.T) {
+		firstDir, secondDir := t.TempDir(), t.TempDir()
+		firstRec, secondRec := &recorder{}, &recorder{}
+		first := startServer(t, treeHandler(firstDir, firstRec))
+		second := startServer(t, treeHandler(secondDir, secondRec))
+		cfg, hosts := multiHosts(t, first.Addr(), second.Addr())
+		cfg.Workdir = "/srv/app"
+
+		if err := Run(cfg, hosts, "echo script ran", entries, io.Discard, io.Discard); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		for i, dir := range []string{firstDir, secondDir} {
+			if got, want := readFile(t, filepath.Join(dir, "app", "config.yml")), "port: 8080\n"; got != want {
+				t.Errorf("host %d config.yml = %q, want %q", i, got, want)
+			}
+		}
+		for i, rec := range []*recorder{firstRec, secondRec} {
+			if sessions := rec.all(); len(sessions) != 2 {
+				t.Errorf("host %d ran %v, want an upload and a script", i, sessions)
+			}
 		}
 	})
 

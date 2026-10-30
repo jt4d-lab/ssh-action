@@ -499,6 +499,26 @@ func TestBarrierReleasesEveryHost(t *testing.T) {
 	}
 }
 
+func TestBarrierAcceptsExtraArrivals(t *testing.T) {
+	barrier := NewBarrier(2)
+	var wg sync.WaitGroup
+	errs := make(chan error, 3)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- barrier.Wait(testTimeout)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("Wait: %v", err)
+		}
+	}
+}
+
 func TestBarrierTimeout(t *testing.T) {
 	barrier := NewBarrier(2)
 	if err := barrier.Wait(20 * time.Millisecond); err == nil {
@@ -559,6 +579,37 @@ func TestServerClose(t *testing.T) {
 	}
 	if _, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
 		t.Fatal("dial to a closed server succeeded")
+	}
+}
+
+func TestServerCloseDropsOpenConnections(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := startServer(t, Options{Password: testPassword, Handler: func(*Session) int {
+		started <- struct{}{}
+		<-release
+		return 0
+	}})
+	client := dial(t, srv, clientConfig(testPassword))
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := runCommand(client, "hang")
+		done <- err
+	}()
+	<-started
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	close(release)
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a command on a closed connection succeeded")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("Close left the open connection running")
 	}
 }
 

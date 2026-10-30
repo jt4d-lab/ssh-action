@@ -19,7 +19,7 @@ inputs:
   key:
     description: Private key content. Use instead of password to authenticate.
   key_path:
-    description: Path of a private key file. Use instead of password to authenticate.
+    description: Absolute path of a private key file. Use instead of password to authenticate.
   passphrase:
     description: Passphrase of the private key.
   fingerprint:
@@ -53,7 +53,7 @@ inputs:
   proxy_key:
     description: Private key content for the jump host.
   proxy_key_path:
-    description: Path of a private key file for the jump host.
+    description: Absolute path of a private key file for the jump host.
   proxy_passphrase:
     description: Passphrase of the jump host private key.
   proxy_fingerprint:

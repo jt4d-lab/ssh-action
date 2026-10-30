@@ -31,13 +31,20 @@ aarch64 | arm64) arch=arm64 ;;
 esac
 
 temp_dir=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
-binary=$temp_dir/ssh-action-$arch/ssh-action
+archive=$action_dir/dist/linux-$arch.gz
+[ -f "$archive" ] || fail "missing $archive: build it with make dist"
+
+# The unpack directory is keyed by the archive it was unpacked from, so a job that
+# runs two refs of this action does not reuse the binary of the other ref.
+key=$(cksum <"$archive" | tr -d ' \n')
+binary=$temp_dir/ssh-action-$arch-$key/ssh-action
 
 if [ ! -x "$binary" ]; then
-	archive=$action_dir/dist/linux-$arch.gz
-	[ -f "$archive" ] || fail "missing $archive: build it with make dist"
 	mkdir -p "${binary%/*}"
-	gzip -dc "$archive" >"$binary"
+	if ! gzip -dc "$archive" >"$binary"; then
+		rm -f "$binary"
+		fail "cannot unpack $archive: not a gzip archive"
+	fi
 	chmod 0755 "$binary"
 fi
 

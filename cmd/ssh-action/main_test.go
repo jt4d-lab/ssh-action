@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/jt4d-lab/ssh-action/internal/config"
 	"github.com/jt4d-lab/ssh-action/internal/sshtest"
 )
 
@@ -226,6 +229,134 @@ func TestRunUnknownFlag(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "no-such-flag") {
 		t.Errorf("stderr = %q, want the flag error", stderr.String())
+	}
+}
+
+// TestFlagInputsCoverFromEnv compares the flag table with the inputs
+// config.FromEnv reads, so an input cannot work in a step and fail on the command
+// line, and checks that every flag parses.
+func TestFlagInputsCoverFromEnv(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "internal", "config", "config.go"))
+	if err != nil {
+		t.Fatalf("read config.go: %v", err)
+	}
+	read := make(map[string]bool)
+	for _, name := range regexp.MustCompile(`INPUT_[A-Z0-9_]+`).FindAllString(string(source), -1) {
+		read[name] = true
+	}
+	flagged := make(map[string]flagInput, len(flagInputs))
+	for _, input := range flagInputs {
+		flagged[input.input] = input
+		for _, alias := range input.aliases {
+			flagged[alias] = input
+		}
+	}
+
+	lookup := func(string) (string, bool) { return "", false }
+	for name := range read {
+		input, ok := flagged[name]
+		if !ok {
+			t.Errorf("%s has no command line flag", name)
+			continue
+		}
+		args := []string{"--" + flagName(name)}
+		if !input.boolean {
+			args[0] += "=value"
+		}
+		if _, _, err := parseFlags(args, lookup, io.Discard); err != nil {
+			t.Errorf("--%s: %v", flagName(name), err)
+		}
+	}
+	for name := range flagged {
+		if !read[name] {
+			t.Errorf("flag --%s overrides an input config.FromEnv does not read", flagName(name))
+		}
+	}
+}
+
+// TestParseFlagsCipherOverridesBothSpellings checks the documented precedence for
+// the cipher input, which config.FromEnv reads under two names: a flag given in
+// either spelling wins over the environment.
+func TestParseFlagsCipherOverridesBothSpellings(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{name: "ciphers flag over INPUT_CIPHER", args: []string{"--ciphers=aes256-ctr"}, env: map[string]string{"INPUT_CIPHER": "aes128-ctr"}, want: "aes256-ctr"},
+		{name: "cipher flag over INPUT_CIPHERS", args: []string{"--cipher=aes256-ctr"}, env: map[string]string{"INPUT_CIPHERS": "aes128-ctr"}, want: "aes256-ctr"},
+		{name: "environment only", env: map[string]string{"INPUT_CIPHERS": "aes128-ctr"}, want: "aes128-ctr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vars := map[string]string{
+				"INPUT_HOST":     "127.0.0.1",
+				"INPUT_PASSWORD": testPassword,
+				"INPUT_SCRIPT":   "true",
+			}
+			for name, value := range tt.env {
+				vars[name] = value
+			}
+
+			inputs, _, err := parseFlags(tt.args, func(name string) (string, bool) {
+				value, ok := vars[name]
+				return value, ok
+			}, io.Discard)
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			cfg, err := config.FromEnv(inputs)
+			if err != nil {
+				t.Fatalf("FromEnv: %v", err)
+			}
+			if got := strings.Join(cfg.Ciphers, ","); got != tt.want {
+				t.Errorf("ciphers = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunRejectsPositionalArguments(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"extra"}, func(string) (string, bool) { return "", false }, &stdout, &stderr)
+	if code != exitConfig {
+		t.Fatalf("exit code = %d, want %d", code, exitConfig)
+	}
+	if !strings.Contains(stderr.String(), "unexpected arguments") {
+		t.Errorf("stderr = %q, want the argument error", stderr.String())
+	}
+}
+
+func TestRunCaptureFileFailure(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{
+		stdoutFileEnv: filepath.Join(t.TempDir(), "missing", "stdout"),
+	}), &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "capture stdout:") {
+		t.Errorf("stderr = %q, want the capture error", stderr.String())
+	}
+}
+
+func TestRunForwardsAllEnvs(t *testing.T) {
+	t.Setenv("PLUGIN_TOKEN", "tok-123")
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, sess.Command+"\n")
+		return 0
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{"INPUT_ALLENVS": "true"}), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "export PLUGIN_TOKEN='tok-123'") {
+		t.Errorf("stdout = %q, want the forwarded variable", stdout.String())
 	}
 }
 

@@ -18,9 +18,9 @@ type Env interface {
 // allEnvsPrefixes lists the variable prefixes forwarded to the host by allenvs.
 var allEnvsPrefixes = []string{"DRONE_", "PLUGIN_", "INPUT_", "GITHUB_"}
 
-// scriptStopGuard saves the status of the preceding line and leaves the shell
-// on a non-zero one.
-const scriptStopGuard = `_ssh_action_rc=$?; [ "$_ssh_action_rc" -eq 0 ] || exit "$_ssh_action_rc"`
+// scriptStopOption opens the script body so that a failing command ends the
+// shell with that command's status.
+const scriptStopOption = "set -e"
 
 // Build assembles the remote shell script from cfg: the workdir prolog, the env
 // exports, the lines of cfg.Script and the lines of the file named by
@@ -70,14 +70,10 @@ func workdirProlog(cfg *config.Config) (string, error) {
 
 func envExports(cfg *config.Config, env Env, warn io.Writer) []string {
 	format := cfg.EnvsFormat
-	if format == "" {
-		format = config.DefaultEnvsFormat
-	}
 	seen := make(map[string]bool)
 	var lines []string
 
 	add := func(name, value string) {
-		name = strings.ToUpper(name)
 		if seen[name] {
 			return
 		}
@@ -86,8 +82,9 @@ func envExports(cfg *config.Config, env Env, warn io.Writer) []string {
 		lines = append(lines, strings.ReplaceAll(line, "{VALUE}", singleQuote(value)))
 	}
 
-	for _, name := range strings.Split(cfg.Envs, ",") {
-		if name = strings.ToUpper(strings.TrimSpace(name)); name == "" {
+	for _, raw := range strings.Split(cfg.Envs, ",") {
+		name := envName(raw)
+		if name == "" {
 			continue
 		}
 		value, ok := env.Lookup(name)
@@ -106,11 +103,16 @@ func envExports(cfg *config.Config, env Env, warn io.Writer) []string {
 			if !ok || !hasAllEnvsPrefix(name) {
 				continue
 			}
-			add(name, value)
+			add(envName(name), value)
 		}
 	}
 
 	return lines
+}
+
+// envName returns the name an env export uses: trimmed and upper-cased.
+func envName(name string) string {
+	return strings.ToUpper(strings.TrimSpace(name))
 }
 
 func hasAllEnvsPrefix(name string) bool {
@@ -134,12 +136,8 @@ func splitLines(s string) []string {
 }
 
 func withScriptStop(lines []string) []string {
-	stopped := make([]string, 0, 2*len(lines))
-	for _, line := range lines {
-		stopped = append(stopped, line)
-		if !strings.HasSuffix(line, `\`) {
-			stopped = append(stopped, scriptStopGuard)
-		}
+	if len(lines) == 0 {
+		return lines
 	}
-	return stopped
+	return append([]string{scriptStopOption}, lines...)
 }

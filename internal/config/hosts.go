@@ -30,7 +30,7 @@ func ParseHosts(list, defaultPort, protocol string) ([]Host, error) {
 		hosts = append(hosts, host)
 	}
 	if len(hosts) == 0 {
-		return nil, invalidf("missing server host")
+		return nil, Invalidf("missing server host")
 	}
 	return hosts, nil
 }
@@ -41,7 +41,7 @@ func parseHost(item, defaultPort, protocol string) (Host, error) {
 	}
 	addr, port, err := net.SplitHostPort(item)
 	if err != nil {
-		return Host{}, invalidf("invalid host %q: want host or host:port, with an IPv6 literal in brackets like [::1]:2222", item)
+		return Host{}, Invalidf("invalid host %q: want host or host:port, with an IPv6 literal in brackets like [::1]:2222", item)
 	}
 	if port == "" {
 		port = defaultPort

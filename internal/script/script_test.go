@@ -34,6 +34,7 @@ func TestBuildOrder(t *testing.T) {
 	cfg := &config.Config{
 		Workdir:    "/srv/app",
 		Envs:       "FOO",
+		EnvsFormat: config.DefaultEnvsFormat,
 		Script:     "first\n\nsecond",
 		ScriptPath: path,
 	}
@@ -150,7 +151,7 @@ func TestBuildEnvs(t *testing.T) {
 	}{
 		{
 			name: "names are upper-cased and values shell quoted",
-			cfg:  config.Config{Script: "true", Envs: "foo, bar"},
+			cfg:  config.Config{Script: "true", Envs: "foo, bar", EnvsFormat: config.DefaultEnvsFormat},
 			env:  fakeEnv{vars: map[string]string{"FOO": "hello world", "BAR": "a'b$c"}},
 			want: "export FOO='hello world'\nexport BAR='a'\\''b$c'\ntrue",
 		},
@@ -162,13 +163,13 @@ func TestBuildEnvs(t *testing.T) {
 		},
 		{
 			name: "set but empty value is exported",
-			cfg:  config.Config{Script: "true", Envs: "EMPTY"},
+			cfg:  config.Config{Script: "true", Envs: "EMPTY", EnvsFormat: config.DefaultEnvsFormat},
 			env:  fakeEnv{vars: map[string]string{"EMPTY": ""}},
 			want: "export EMPTY=''\ntrue",
 		},
 		{
 			name: "empty envs entry is skipped",
-			cfg:  config.Config{Script: "true", Envs: " , FOO ,"},
+			cfg:  config.Config{Script: "true", Envs: " , FOO ,", EnvsFormat: config.DefaultEnvsFormat},
 			env:  fakeEnv{vars: map[string]string{"FOO": "x"}},
 			want: "export FOO='x'\ntrue",
 		},
@@ -189,7 +190,7 @@ func TestBuildEnvs(t *testing.T) {
 
 func TestBuildEnvsMissing(t *testing.T) {
 	var warn bytes.Buffer
-	cfg := &config.Config{Script: "true", Envs: "FOO, MISSING"}
+	cfg := &config.Config{Script: "true", Envs: "FOO, MISSING", EnvsFormat: config.DefaultEnvsFormat}
 	got, err := script.Build(cfg, fakeEnv{vars: map[string]string{"FOO": "x"}}, &warn)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -214,7 +215,7 @@ func TestBuildAllEnvs(t *testing.T) {
 	}}
 
 	t.Run("prefixed variables only", func(t *testing.T) {
-		got, err := script.Build(&config.Config{Script: "true", AllEnvs: true}, env, nil)
+		got, err := script.Build(&config.Config{Script: "true", AllEnvs: true, EnvsFormat: config.DefaultEnvsFormat}, env, nil)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
@@ -244,7 +245,7 @@ func TestBuildEnvsPrecedence(t *testing.T) {
 		vars:    map[string]string{"INPUT_FILES": "explicit"},
 		environ: []string{"INPUT_FILES=from_environ"},
 	}
-	got, err := script.Build(&config.Config{Script: "true", Envs: "input_files", AllEnvs: true}, env, nil)
+	got, err := script.Build(&config.Config{Script: "true", Envs: "input_files", AllEnvs: true, EnvsFormat: config.DefaultEnvsFormat}, env, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -256,8 +257,9 @@ func TestBuildEnvsPrecedence(t *testing.T) {
 func TestBuildEnvsInShell(t *testing.T) {
 	value := `p@ss w'rd "$HOME" ` + "`uname`" + ` \ end`
 	cfg := &config.Config{
-		Script: `printf '%s\n' "$PLUGIN_VALUE"`,
-		Envs:   "PLUGIN_VALUE",
+		Script:     `printf '%s\n' "$PLUGIN_VALUE"`,
+		Envs:       "PLUGIN_VALUE",
+		EnvsFormat: config.DefaultEnvsFormat,
 	}
 	text, err := script.Build(cfg, fakeEnv{vars: map[string]string{"PLUGIN_VALUE": value}}, nil)
 	if err != nil {
@@ -272,26 +274,22 @@ func TestBuildEnvsInShell(t *testing.T) {
 	}
 }
 
-const testGuard = `_ssh_action_rc=$?; [ "$_ssh_action_rc" -eq 0 ] || exit "$_ssh_action_rc"`
+const testScriptStop = "set -e"
 
 func TestBuildScriptStop(t *testing.T) {
-	t.Run("guard after every line", func(t *testing.T) {
+	t.Run("set -e opens the body", func(t *testing.T) {
 		cfg := &config.Config{Script: "echo one\n\nfalse\necho two", ScriptStop: true}
 		got, err := script.Build(cfg, fakeEnv{}, nil)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		want := strings.Join([]string{
-			"echo one", testGuard,
-			"false", testGuard,
-			"echo two", testGuard,
-		}, "\n")
+		want := strings.Join([]string{testScriptStop, "echo one", "false", "echo two"}, "\n")
 		if got != want {
 			t.Errorf("Build() = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("no guard without script_stop", func(t *testing.T) {
+	t.Run("no set -e without script_stop", func(t *testing.T) {
 		cfg := &config.Config{Script: "echo one\nfalse"}
 		got, err := script.Build(cfg, fakeEnv{}, nil)
 		if err != nil {
@@ -302,22 +300,25 @@ func TestBuildScriptStop(t *testing.T) {
 		}
 	})
 
-	t.Run("no guard after a continuation line", func(t *testing.T) {
-		cfg := &config.Config{Script: "echo one \\\n  two\nfalse", ScriptStop: true}
-		got, err := script.Build(cfg, fakeEnv{}, nil)
+	t.Run("set -e follows the prolog and the env exports", func(t *testing.T) {
+		cfg := &config.Config{
+			Workdir:    "/srv/app",
+			Envs:       "FOO",
+			EnvsFormat: config.DefaultEnvsFormat,
+			Script:     "false",
+			ScriptStop: true,
+		}
+		got, err := script.Build(cfg, fakeEnv{vars: map[string]string{"FOO": "x"}}, nil)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		want := strings.Join([]string{
-			"echo one \\", "  two", testGuard,
-			"false", testGuard,
-		}, "\n")
+		want := "cd '/srv/app' || exit 1\nexport FOO='x'\n" + testScriptStop + "\nfalse"
 		if got != want {
 			t.Errorf("Build() = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("script_path lines are guarded", func(t *testing.T) {
+	t.Run("script_path lines are covered", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "deploy.sh")
 		if err := os.WriteFile(path, []byte("false\n"), 0o644); err != nil {
 			t.Fatalf("write script_path: %v", err)
@@ -326,7 +327,17 @@ func TestBuildScriptStop(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		if want := "false\n" + testGuard; got != want {
+		if want := testScriptStop + "\nfalse"; got != want {
+			t.Errorf("Build() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty body stays empty", func(t *testing.T) {
+		got, err := script.Build(&config.Config{Workdir: "/srv/app", ScriptStop: true}, fakeEnv{}, nil)
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if want := "cd '/srv/app' || exit 1"; got != want {
 			t.Errorf("Build() = %q, want %q", got, want)
 		}
 	})
@@ -377,6 +388,105 @@ func TestBuildScriptStopInShell(t *testing.T) {
 			t.Errorf("exit code = %d, want 1", code)
 		}
 	})
+}
+
+func TestBuildScriptStopBlocksInShell(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		wantOut  string
+		wantCode int
+	}{
+		{
+			name: "if/else with a false condition",
+			script: "if false; then\n" +
+				"  printf 'yes\\n'\n" +
+				"else\n" +
+				"  printf 'no\\n'\n" +
+				"fi\n" +
+				"printf 'after\\n'",
+			wantOut:  "no\nafter\n",
+			wantCode: 0,
+		},
+		{
+			name: "case block",
+			script: "case two in\n" +
+				"  one)\n" +
+				"    printf 'one\\n'\n" +
+				"    ;;\n" +
+				"  two)\n" +
+				"    printf 'two\\n'\n" +
+				"    ;;\n" +
+				"esac\n" +
+				"printf 'after\\n'",
+			wantOut:  "two\nafter\n",
+			wantCode: 0,
+		},
+		{
+			name: "for and while loops",
+			script: "for i in 1 2; do\n" +
+				"  printf 'for %s\\n' \"$i\"\n" +
+				"done\n" +
+				"n=0\n" +
+				"while [ \"$n\" -lt 1 ]; do\n" +
+				"  n=$((n + 1))\n" +
+				"  printf 'while %s\\n' \"$n\"\n" +
+				"done\n" +
+				"printf 'after\\n'",
+			wantOut:  "for 1\nfor 2\nwhile 1\nafter\n",
+			wantCode: 0,
+		},
+		{
+			name: "brace and subshell groups",
+			script: "{\n" +
+				"  printf 'brace\\n'\n" +
+				"}\n" +
+				"(\n" +
+				"  printf 'subshell\\n'\n" +
+				")\n" +
+				"printf 'after\\n'",
+			wantOut:  "brace\nsubshell\nafter\n",
+			wantCode: 0,
+		},
+		{
+			name: "failure inside an if body stops the script",
+			script: "if true; then\n" +
+				"  printf 'inside\\n'\n" +
+				"  exit 9\n" +
+				"fi\n" +
+				"printf 'after\\n'",
+			wantOut:  "inside\n",
+			wantCode: 9,
+		},
+		{
+			name: "failure inside a case item stops the script",
+			script: "case one in\n" +
+				"  one)\n" +
+				"    false\n" +
+				"    printf 'not reached\\n'\n" +
+				"    ;;\n" +
+				"esac\n" +
+				"printf 'after\\n'",
+			wantOut:  "",
+			wantCode: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, err := script.Build(&config.Config{Script: tt.script, ScriptStop: true}, fakeEnv{}, nil)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			out, code := runShell(t, text, t.TempDir())
+			if out != tt.wantOut {
+				t.Errorf("stdout = %q, want %q", out, tt.wantOut)
+			}
+			if code != tt.wantCode {
+				t.Errorf("exit code = %d, want %d", code, tt.wantCode)
+			}
+		})
+	}
 }
 
 func runShell(t *testing.T, text, home string) (string, int) {

@@ -96,7 +96,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		}
 		b, err := strconv.ParseBool(strings.TrimSpace(v))
 		if err != nil {
-			errs = append(errs, invalidf("invalid boolean %q in %s", v, name))
+			errs = append(errs, Invalidf("invalid boolean %q in %s", v, name))
 			return false
 		}
 		return b
@@ -108,7 +108,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		}
 		d, err := time.ParseDuration(strings.TrimSpace(v))
 		if err != nil || d <= 0 {
-			errs = append(errs, invalidf("invalid duration %q in %s", v, name))
+			errs = append(errs, Invalidf("invalid duration %q in %s", v, name))
 			return fallback
 		}
 		return d
@@ -117,7 +117,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		v := strings.TrimSpace(str(name, fallback))
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 65535 {
-			errs = append(errs, invalidf("invalid port %q in %s", v, name))
+			errs = append(errs, Invalidf("invalid port %q in %s", v, name))
 		}
 		return v
 	}
@@ -126,7 +126,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		switch v {
 		case "tcp", "tcp4", "tcp6":
 		default:
-			errs = append(errs, invalidf("invalid protocol %q in %s: want tcp, tcp4 or tcp6", v, name))
+			errs = append(errs, Invalidf("invalid protocol %q in %s: want tcp, tcp4 or tcp6", v, name))
 		}
 		return v
 	}
@@ -188,7 +188,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		Debug:          boolean("INPUT_DEBUG"),
 		CaptureStdout:  boolean("INPUT_CAPTURE_STDOUT"),
 
-		Workdir:       str("INPUT_WORKDIR", ""),
+		Workdir:       strings.TrimSpace(str("INPUT_WORKDIR", "")),
 		CreateWorkdir: boolean("INPUT_CREATE_WORKDIR"),
 		Files:         str("INPUT_FILES", ""),
 	}
@@ -205,24 +205,24 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 // Validate reports the first violated input rule as an ErrInvalidConfig error.
 func (c *Config) Validate() error {
 	if !hasHost(c.Host) {
-		return invalidf("missing server host")
+		return Invalidf("missing server host")
 	}
 	if c.Key == "" && c.KeyPath == "" && c.Password == "" {
-		return invalidf("missing password, key or key_path")
+		return Invalidf("missing password, key or key_path")
 	}
 	if strings.HasPrefix(c.Workdir, "~") && c.Workdir != "~" && !strings.HasPrefix(c.Workdir, "~/") {
-		return invalidf(`workdir %q: only the current user home ("~" or "~/...") can be expanded`, c.Workdir)
+		return Invalidf(`workdir %q: only the current user home ("~" or "~/...") can be expanded`, c.Workdir)
 	}
 	if c.Workdir == "" {
 		if strings.TrimSpace(c.Files) != "" {
-			return invalidf("files requires workdir")
+			return Invalidf("files requires workdir")
 		}
 		if c.CreateWorkdir {
-			return invalidf("create_workdir requires workdir")
+			return Invalidf("create_workdir requires workdir")
 		}
 	}
 	if strings.TrimSpace(c.Script) == "" && strings.TrimSpace(c.ScriptPath) == "" && strings.TrimSpace(c.Files) == "" {
-		return invalidf("nothing to execute: script, script_path and files are empty")
+		return Invalidf("nothing to execute: script, script_path and files are empty")
 	}
 	return nil
 }
@@ -316,6 +316,8 @@ func hasHost(list string) bool {
 	return false
 }
 
-func invalidf(format string, args ...any) error {
+// Invalidf returns an error that wraps ErrInvalidConfig with the message
+// formatted from format and args.
+func Invalidf(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidConfig, fmt.Sprintf(format, args...))
 }

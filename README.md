@@ -43,7 +43,7 @@ The hosts need a POSIX shell, and `tar` (GNU or busybox) when `files` is used.
 | `username` | `root` | User to log in as. |
 | `password` | — | Password. Use instead of `key` or `key_path`. |
 | `key` | — | Private key content. Use instead of `password`. |
-| `key_path` | — | Path of a private key file. Use instead of `password`. |
+| `key_path` | — | Absolute path of a private key file. Use instead of `password`. |
 | `passphrase` | — | Passphrase of the private key. |
 | `fingerprint` | — | Expected host key fingerprint, for example `SHA256:…`. |
 | `timeout` | `30s` | SSH handshake timeout. |
@@ -66,7 +66,7 @@ Every target host is reached through `proxy_host` when it is set.
 | `proxy_username` | — | User to log in to the jump host as. |
 | `proxy_password` | — | Password of the jump host user. |
 | `proxy_key` | — | Private key content for the jump host. |
-| `proxy_key_path` | — | Path of a private key file for the jump host. |
+| `proxy_key_path` | — | Absolute path of a private key file for the jump host. |
 | `proxy_passphrase` | — | Passphrase of the jump host private key. |
 | `proxy_fingerprint` | — | Expected fingerprint of the jump host key. |
 | `proxy_cipher` | — | Comma separated SSH ciphers of the jump host. |
@@ -109,10 +109,10 @@ makes a copy-only deploy.
 
 `0` — success; `1` — a failed connection, upload, command or timeout; `2` — a
 broken configuration, detected before any connection is made: a missing host, no
-credentials, an unknown protocol, an invalid `port` or boolean, an unparsable
-duration, `workdir` of the form `~user/…`, `files` or `create_workdir` without
-`workdir`, a `files` pattern that matches nothing, or an empty `script` with
-neither `script_path` nor `files`.
+credentials, an unknown protocol, an invalid `port` or boolean, a duration that
+does not parse or is not positive, `workdir` of the form `~user/…`, `files` or
+`create_workdir` without `workdir`, a `files` pattern that matches nothing, or an
+empty `script` with neither `script_path` nor `files`.
 
 The exit status of the remote command is not passed through: the step exits with
 `1` and the status is part of the error message.
@@ -150,8 +150,8 @@ as a silent login somewhere else.
       ./deploy.sh --ref "$GITHUB_SHA"
 ```
 
-`key_path: ~/.ssh/id_ed25519` works as well, when the runner already has the
-file.
+`key_path` works as well, when the runner already has the file. The path is used
+as it is written, so write it absolute: `~` is not expanded.
 
 ### Through a jump host
 
@@ -172,7 +172,9 @@ file.
 
 The hosts run in parallel by default: every host starts, the step waits for all
 of them and reports the first failure. With `sync: true` they run one after
-another and the first failure stops the rest.
+another and the first failure stops the rest. With more than one host every line
+of remote stdout and stderr is prefixed with `host:port: `, so the output of the
+hosts stays apart; a single host is logged unprefixed.
 
 ```yaml
 - uses: jt4d-lab/ssh-action@v1.0.0
@@ -189,7 +191,10 @@ another and the first failure stops the rest.
 ```
 
 With `script_stop` a failing line ends the script with that line's exit status
-instead of running the remaining ones.
+instead of running the remaining ones. The script body runs under `set -e`, so
+`if/else`, `case`, loops and `{ }`/`( )` blocks keep their shell semantics: a
+failing condition of an `if`/`while` or the left side of `&&`/`||` does not end
+the script.
 
 ### Environment variables
 
@@ -232,7 +237,8 @@ variable of the runner instead. It forwards `INPUT_KEY`, `INPUT_PASSWORD`,
 ```
 
 Only the remote stdout lands in the output: the service messages of the action
-go to stderr, so the output is exactly what the command printed. A failing
+go to stderr, so the output is exactly what the command printed, with the
+`host:port: ` prefix on every line when the step runs on several hosts. A failing
 command still fills the output and fails the step with exit code `1`, with the
 remote status in the error message.
 
@@ -240,9 +246,11 @@ remote status in the error message.
 
 `files` copies each match of a pattern, with its own basename, into `workdir`.
 Each `files` name is resolved against `GITHUB_WORKSPACE` unless it is absolute.
-`filepath.Glob` does the matching, so `**` is not supported: `dist/*` matches the
-entries of `dist/`, `dist/**` matches nothing and fails the step. A pattern that
-matches nothing is an error, not an empty deploy.
+`filepath.Glob` does the matching, and it has no `**` operator: `dist/**` is
+another spelling of `dist/*`, so it matches the entries of `dist/` one level
+deep, a subdirectory among them as a single entry, and `a/**/b` matches exactly
+one directory between `a` and `b`, never a recursive walk. A pattern that matches
+nothing is an error, not an empty deploy.
 
 ```yaml
 - uses: jt4d-lab/ssh-action@v1.0.0
@@ -279,8 +287,8 @@ unpacks into its own paths if `workdir` is versioned, as above.
 Replace the `uses:` line, keep the `with:` block:
 
 ```diff
--- uses: appleboy/ssh-action@v1.2.0
-++ uses: jt4d-lab/ssh-action@v1.0.0
+- - uses: appleboy/ssh-action@v1.2.0
++ - uses: jt4d-lab/ssh-action@v1.0.0
    with:
      host: ${{ secrets.SSH_HOST }}
      username: ${{ secrets.SSH_USER }}
@@ -303,6 +311,9 @@ nothing else has to change. Differences to look at:
   keeps working.
 - Configuration errors exit with `2` instead of `1`, so a broken `with:` block
   can no longer be mistaken for a failed remote command.
+- `timeout`, `command_timeout` and `proxy_timeout` have to be positive. Upstream
+  read `timeout: 0s` as "no timeout"; here it is a configuration error (`2`),
+  because a zero budget cannot bound a host run.
 - Service messages of the action (the warnings about skipped `envs` names, the
   errors, the final `✅` line) go to stderr, and the `stdout` output carries the
   remote stdout only. Upstream mixed both streams into its captured stdout.
@@ -327,7 +338,7 @@ Conscious differences from `appleboy/ssh-action`:
 
 Limitations:
 
-- Runners: linux/amd64 and linux/arm64 only, with `sh`, `gzip` and the
+- Runners: linux/amd64 and linux/arm64 only, with `sh`, `gzip`, `cksum` and the
   `mktemp`/`od`/`tr` used to write the `stdout` output.
 - Hosts: a POSIX shell; `tar` (GNU or busybox) for `files`.
 - `workdir` is an absolute path or `~/path`; `~user/…` is rejected.
@@ -367,9 +378,27 @@ tags carries `dev` and `make release-check` rejects it.
 
 ## Development
 
-`make build` compiles `bin/ssh-action`, `make test` runs `go test ./...`, and
-`make lint` runs `go vet ./...` and `shellcheck` over the entrypoint and the
-scripts in `tests/`. Conventions that a test or a CI step keeps in place:
+`make build` compiles `bin/ssh-action`, `make test` runs `go test -race ./...`,
+and `make lint` runs `go vet ./...` and `shellcheck` over the entrypoint and the
+scripts in `tests/`. Two shell suites back the repository contract and are not
+part of `make test`, so run them by hand: `sh tests/entrypoint_test.sh` checks
+the entrypoint behaviour and the input tables of this README against `action.yml`,
+and `sh tests/dist_test.sh` checks the committed `dist/`.
+
+Running a scenario locally goes through the binary. It reads the action inputs
+from `INPUT_*` and accepts one lowercase flag per input (`--host`, `--script`,
+`--cipher`, …; booleans are switches) plus `--version`, so
+`INPUT_HOST=127.0.0.1 INPUT_PASSWORD=pw bin/ssh-action --script 'uname -a' --debug`
+reproduces a step without a workflow. `--debug` prints the redacted inputs.
+
+`testserver` is the SSH server the e2e job runs on the runner: `go build -o
+bin/testserver ./testserver`, then `bin/testserver -addr 127.0.0.1:2201 -password
+pw -client-key /tmp/k` prints `addr=…` and `fingerprint=…` for the `host` and
+`fingerprint` inputs and accepts sessions with both password and key. `-jump`
+makes the process a forwarding-only bastion. The process serves `exec` with the
+real `sh` and `tar` of the machine and stops on `SIGINT` or `SIGTERM`.
+
+Conventions that a test or a CI step keeps in place:
 
 - `dist/` is built with `-trimpath -buildvcs=false`, so that one source gives
   byte-identical archives in any commit; `make release-check` compares the

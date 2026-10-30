@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -102,6 +103,37 @@ func TestMatchFiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMatchFilesDoubleStar pins the documented meaning of "**": filepath.Glob
+// has no recursive wildcard, so "**" matches exactly one path element.
+func TestMatchFilesDoubleStar(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "dist", "one.gz"), "one", 0o644)
+	writeFile(t, filepath.Join(dir, "dist", "nested", "two.gz"), "two", 0o644)
+
+	tests := []struct {
+		files string
+		want  []string
+	}{
+		{
+			files: filepath.Join(dir, "dist", "**"),
+			want:  []string{filepath.Join(dir, "dist", "nested"), filepath.Join(dir, "dist", "one.gz")},
+		},
+		{
+			files: filepath.Join(dir, "dist", "**", "*.gz"),
+			want:  []string{filepath.Join(dir, "dist", "nested", "two.gz")},
+		},
+	}
+	for _, test := range tests {
+		got, err := MatchFiles(test.files, nil)
+		if err != nil {
+			t.Fatalf("MatchFiles(%q): %v", test.files, err)
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Errorf("MatchFiles(%q) = %v, want %v", test.files, got, test.want)
+		}
 	}
 }
 
@@ -459,6 +491,42 @@ func TestUploadTarFailure(t *testing.T) {
 	}
 	if sessions := rec.all(); len(sessions) != 1 {
 		t.Errorf("sessions = %v, want only the failed upload", sessions)
+	}
+}
+
+// TestUploadWritesOneStderrSafely reports a skipped local entry and the remote
+// tar stderr to the same bytes.Buffer, which only survives the two producers
+// because upload serializes their writes.
+func TestUploadWritesOneStderrSafely(t *testing.T) {
+	local := t.TempDir()
+	writeFile(t, filepath.Join(local, "app", "payload.bin"), strings.Repeat("x", 1<<20), 0o600)
+	if err := syscall.Mkfifo(filepath.Join(local, "app", "0pipe"), 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	entries, err := MatchFiles(filepath.Join(local, "app"), nil)
+	if err != nil {
+		t.Fatalf("MatchFiles: %v", err)
+	}
+
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		for range 100 {
+			_, _ = io.WriteString(sess.Stderr, "tar: noise\n")
+			time.Sleep(time.Millisecond)
+		}
+		_, _ = io.Copy(io.Discard, sess.Stdin)
+		return 0
+	})
+	cfg, host := testTarget(t, srv.Addr(), testPassword)
+	client := connectTo(t, cfg, host)
+
+	var stderr bytes.Buffer
+	if err := upload(client, host, "/srv/app", entries, time.Now().Add(testDeadline), &stderr, &stderr); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	for _, want := range []string{"tar: noise", "warning: skip"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+		}
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "testserver: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "testserver: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -42,10 +42,10 @@ func MatchFiles(files string, lookup func(string) (string, bool)) ([]string, err
 		}
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
-			return nil, invalidf("files %q: %v", pattern, err)
+			return nil, config.Invalidf("files %q: %v", pattern, err)
 		}
 		if len(matches) == 0 {
-			return nil, invalidf("files %q: no match", pattern)
+			return nil, config.Invalidf("files %q: no match", pattern)
 		}
 		for _, match := range matches {
 			base := filepath.Base(match)
@@ -144,8 +144,4 @@ func copyToTar(tw *tar.Writer, path string) error {
 	defer func() { _ = file.Close() }()
 	_, err = io.Copy(tw, file)
 	return err
-}
-
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", config.ErrInvalidConfig, fmt.Sprintf(format, args...))
 }

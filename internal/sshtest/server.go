@@ -27,8 +27,6 @@ type Pty struct {
 	Term    string
 	Columns uint32
 	Rows    uint32
-	Width   uint32
-	Height  uint32
 }
 
 // Session is one accepted SSH session channel.
@@ -56,8 +54,6 @@ type Options struct {
 	Password string
 	// AuthorizedKeys are the public keys accepted for public key authentication.
 	AuthorizedKeys []ssh.PublicKey
-	// HostKey is the server host key; a new ed25519 key is generated when nil.
-	HostKey ssh.Signer
 	// Handler serves the exec requests and is required.
 	Handler Handler
 }
@@ -83,15 +79,9 @@ func NewServer(opts Options) (*Server, error) {
 		return nil, errors.New("sshtest: missing password or authorized keys")
 	}
 
-	hostKey := opts.HostKey
-	if hostKey == nil {
-		_, priv, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			return nil, fmt.Errorf("sshtest: generate host key: %w", err)
-		}
-		if hostKey, err = ssh.NewSignerFromKey(priv); err != nil {
-			return nil, fmt.Errorf("sshtest: host key signer: %w", err)
-		}
+	hostKey, err := newHostKey()
+	if err != nil {
+		return nil, err
 	}
 
 	config := &ssh.ServerConfig{}
@@ -151,6 +141,19 @@ func (s *Server) Addr() string {
 // HostKey is the public part of the host key a client sees.
 func (s *Server) HostKey() ssh.PublicKey {
 	return s.hostKey.PublicKey()
+}
+
+// newHostKey generates the ed25519 host key every server presents.
+func newHostKey() (ssh.Signer, error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("sshtest: generate host key: %w", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("sshtest: host key signer: %w", err)
+	}
+	return signer, nil
 }
 
 // Close stops accepting connections and drops every open one.
@@ -289,6 +292,8 @@ func (s *Server) forward(newChan ssh.NewChannel) {
 	defer func() { _ = ch.Close() }()
 	go ssh.DiscardRequests(chReqs)
 
+	// Each direction signals once; the spare slot lets the copy that loses the
+	// race exit after the forward has returned.
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(ch, target)
@@ -317,13 +322,7 @@ func parsePty(payload []byte) (*Pty, error) {
 	if err := ssh.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
-	return &Pty{
-		Term:    req.Term,
-		Columns: req.Columns,
-		Rows:    req.Rows,
-		Width:   req.Width,
-		Height:  req.Height,
-	}, nil
+	return &Pty{Term: req.Term, Columns: req.Columns, Rows: req.Rows}, nil
 }
 
 func parseCommand(payload []byte) (string, error) {
@@ -461,7 +460,7 @@ func (b *Barrier) Wait(timeout time.Duration) error {
 	b.mu.Lock()
 	b.arrived++
 	arrived := b.arrived
-	if arrived >= b.expect {
+	if arrived == b.expect {
 		close(b.release)
 	}
 	release := b.release

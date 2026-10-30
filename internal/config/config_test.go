@@ -296,6 +296,27 @@ func TestFromEnvValidationRules(t *testing.T) {
 	}
 }
 
+// TestFromEnvTrimsWorkdir pins that the whitespace of a YAML block scalar does
+// not reach the shell and does not hide a foreign home from the ~user rule.
+func TestFromEnvTrimsWorkdir(t *testing.T) {
+	vars := baseInputs()
+	vars["INPUT_WORKDIR"] = "  /srv/app\n"
+	cfg, err := config.FromEnv(lookup(vars))
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if got, want := cfg.Workdir, "/srv/app"; got != want {
+		t.Errorf("Workdir = %q, want %q", got, want)
+	}
+
+	for _, workdir := range []string{" ~bob/app", "~bob/app\n"} {
+		vars["INPUT_WORKDIR"] = workdir
+		if _, err := config.FromEnv(lookup(vars)); !errors.Is(err, config.ErrInvalidConfig) {
+			t.Errorf("FromEnv workdir %q error = %v, want ErrInvalidConfig", workdir, err)
+		}
+	}
+}
+
 func TestFromEnvCopyOnlyMode(t *testing.T) {
 	vars := baseInputs()
 	delete(vars, "INPUT_SCRIPT")

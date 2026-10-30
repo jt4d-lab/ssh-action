@@ -2,7 +2,6 @@
 package script
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/jt4d-lab/ssh-action/internal/config"
@@ -16,7 +15,7 @@ import (
 func QuotePath(p string) (string, error) {
 	switch {
 	case p == "":
-		return "", invalidf("empty path")
+		return "", config.Invalidf("empty path")
 	case p == "~":
 		return `"$HOME"`, nil
 	case strings.HasPrefix(p, "~/"):
@@ -25,15 +24,11 @@ func QuotePath(p string) (string, error) {
 		}
 		return `"$HOME"`, nil
 	case strings.HasPrefix(p, "~"):
-		return "", invalidf("path %q: only the current user home (%q or %q) can be expanded", p, "~", "~/...")
+		return "", config.Invalidf("path %q: only the current user home (%q or %q) can be expanded", p, "~", "~/...")
 	}
 	return singleQuote(p), nil
 }
 
 func singleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", config.ErrInvalidConfig, fmt.Sprintf(format, args...))
 }

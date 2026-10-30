@@ -70,6 +70,18 @@ check_missing() {
 	fi
 }
 
+# unpacked_binary prints the binary the entrypoint unpacked under the temp
+# directory $1 for architecture $2, or nothing when there is none.
+unpacked_binary() {
+	for path in "$1"/ssh-action-"$2"-*/ssh-action; do
+		if [ -e "$path" ]; then
+			printf '%s\n' "$path"
+			return 0
+		fi
+	done
+	return 0
+}
+
 # fake_binary prints the source of the stand-in for the real binary: it reports
 # the architecture it was packed for, mimics the SSH_ACTION_STDOUT_FILE write and
 # exits with FAKE_EXIT_CODE.
@@ -115,15 +127,15 @@ test_architecture_selection() {
 	run_entrypoint RUNNER_TEMP="$case_dir/runner"
 	check_status "amd64: exit status" 0
 	check_contains "amd64: the amd64 binary ran" "$case_dir/stdout" "arch amd64"
-	check_exists "amd64: binary unpacked into RUNNER_TEMP" "$case_dir/runner/ssh-action-amd64/ssh-action"
-	check_missing "amd64: arm64 binary not unpacked" "$case_dir/runner/ssh-action-arm64"
+	check_exists "amd64: binary unpacked into RUNNER_TEMP" "$(unpacked_binary "$case_dir/runner" amd64)"
+	check_equal "amd64: arm64 binary not unpacked" "" "$(unpacked_binary "$case_dir/runner" arm64)"
 
 	new_case arch-arm64 aarch64
 	run_entrypoint RUNNER_TEMP="$case_dir/runner"
 	check_status "arm64: exit status" 0
 	check_contains "arm64: the arm64 binary ran" "$case_dir/stdout" "arch arm64"
-	check_exists "arm64: binary unpacked into RUNNER_TEMP" "$case_dir/runner/ssh-action-arm64/ssh-action"
-	check_missing "arm64: amd64 binary not unpacked" "$case_dir/runner/ssh-action-amd64"
+	check_exists "arm64: binary unpacked into RUNNER_TEMP" "$(unpacked_binary "$case_dir/runner" arm64)"
+	check_equal "arm64: amd64 binary not unpacked" "" "$(unpacked_binary "$case_dir/runner" amd64)"
 }
 
 test_unknown_architecture() {
@@ -140,24 +152,49 @@ test_missing_archive() {
 	run_entrypoint RUNNER_TEMP="$case_dir/runner"
 	check_status "missing archive: exit status" 2
 	check_contains "missing archive: stderr names make dist" "$case_dir/stderr" "make dist"
-	check_missing "missing archive: binary not created" "$case_dir/runner/ssh-action-amd64/ssh-action"
+	check_equal "missing archive: binary not created" "" "$(unpacked_binary "$case_dir/runner" amd64)"
+}
+
+test_corrupt_archive() {
+	new_case corrupt-archive x86_64
+	printf 'not a gzip archive\n' >"$case_dir/dist/linux-amd64.gz"
+	run_entrypoint RUNNER_TEMP="$case_dir/runner"
+	check_status "corrupt archive: exit status" 2
+	check_contains "corrupt archive: stderr names the archive" "$case_dir/stderr" "linux-amd64.gz"
+	check_equal "corrupt archive: nothing unpacked" "" "$(unpacked_binary "$case_dir/runner" amd64)"
 }
 
 test_default_temp_dir() {
 	new_case temp-fallback x86_64
 	run_entrypoint
 	check_status "default temp: exit status without RUNNER_TEMP" 0
-	check_exists "default temp: binary under TMPDIR" "$case_dir/tmp/ssh-action-amd64/ssh-action"
+	check_exists "default temp: binary under TMPDIR" "$(unpacked_binary "$case_dir/tmp" amd64)"
 }
 
 test_second_run_reuses_binary() {
 	new_case rerun x86_64
 	run_entrypoint RUNNER_TEMP="$case_dir/runner"
 	check_status "rerun: first exit status" 0
-	printf '#!/bin/sh\nprintf "reused binary\\n"\n' >"$case_dir/runner/ssh-action-amd64/ssh-action"
+	printf '#!/bin/sh\nprintf "reused binary\\n"\n' >"$(unpacked_binary "$case_dir/runner" amd64)"
 	run_entrypoint RUNNER_TEMP="$case_dir/runner"
 	check_status "rerun: second exit status" 0
 	check_contains "rerun: the unpacked binary is reused" "$case_dir/stdout" "reused binary"
+}
+
+test_two_refs_of_the_action() {
+	new_case refs-first x86_64
+	runner=$case_dir/runner
+	run_entrypoint RUNNER_TEMP="$runner"
+	check_status "two refs: first ref exit status" 0
+	check_contains "two refs: the first ref runs its own binary" "$case_dir/stdout" "arch amd64"
+
+	new_case refs-second x86_64
+	printf '#!/bin/sh\nprintf "second ref binary\\n"\n' >"$case_dir/dist/linux-amd64"
+	gzip -9n -c "$case_dir/dist/linux-amd64" >"$case_dir/dist/linux-amd64.gz"
+	rm -f "$case_dir/dist/linux-amd64"
+	run_entrypoint RUNNER_TEMP="$runner"
+	check_status "two refs: second ref exit status" 0
+	check_contains "two refs: the second ref unpacks its own binary" "$case_dir/stdout" "second ref binary"
 }
 
 test_capture_stdout() {
@@ -199,6 +236,16 @@ test_capture_stdout_without_final_newline() {
 	check_contains "capture raw: payload written" "$case_dir/output" "raw output"
 	check_equal "capture raw: value closed by the delimiter" \
 		"$(sed -n '1s/^stdout<<//p' "$case_dir/output")" "$(tail -n 1 "$case_dir/output")"
+}
+
+test_capture_stdout_without_github_output() {
+	new_case capture-no-output x86_64
+	run_entrypoint RUNNER_TEMP="$case_dir/runner" INPUT_CAPTURE_STDOUT=true \
+		FAKE_STDOUT_RECORD="$case_dir/record" FAKE_EXIT_CODE=5
+	check_status "capture without GITHUB_OUTPUT: exit status kept" 5
+	check_contains "capture without GITHUB_OUTPUT: warning on stderr" \
+		"$case_dir/stderr" "GITHUB_OUTPUT is not set"
+	check_missing "capture without GITHUB_OUTPUT: capture file removed" "$(cat "$case_dir/record")"
 }
 
 test_capture_disabled() {
@@ -284,7 +331,7 @@ test_documentation() {
 
 	check_contains "README: migration section" "$readme" "## Migrating from appleboy/ssh-action"
 	check_contains "README: dropped curl_insecure input" "$readme" "curl_insecure"
-	check_contains "README: files does not expand **" "$readme" '`**` is not supported'
+	check_contains "README: files does not expand **" "$readme" "no \`**\` operator"
 	check_contains "README: allenvs forwards GITHUB_TOKEN" "$readme" "GITHUB_TOKEN"
 	check_contains "README: development conventions" "$readme" "## Development"
 	check_contains "README: reproducible dist build" "$readme" "-buildvcs=false"
@@ -296,11 +343,14 @@ test_documentation() {
 test_architecture_selection
 test_unknown_architecture
 test_missing_archive
+test_corrupt_archive
 test_default_temp_dir
 test_second_run_reuses_binary
+test_two_refs_of_the_action
 test_capture_stdout
 test_capture_stdout_keeps_failure
 test_capture_stdout_without_final_newline
+test_capture_stdout_without_github_output
 test_capture_disabled
 test_action_definition
 test_documentation

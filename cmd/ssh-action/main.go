@@ -32,61 +32,56 @@ const (
 	exitConfig  = 2
 )
 
-// flagInputs are the action inputs that command line flags can override. A flag
-// name drops the INPUT_ prefix and lower-cases the rest.
-var flagInputs = []string{
-	"INPUT_HOST",
-	"INPUT_PORT",
-	"INPUT_PROTOCOL",
-	"INPUT_USERNAME",
-	"INPUT_PASSWORD",
-	"INPUT_KEY",
-	"INPUT_KEY_PATH",
-	"INPUT_PASSPHRASE",
-	"INPUT_FINGERPRINT",
-	"INPUT_CIPHER",
-	"INPUT_USE_INSECURE_CIPHER",
-	"INPUT_TIMEOUT",
-	"INPUT_SYNC",
-	"INPUT_PROXY_HOST",
-	"INPUT_PROXY_PORT",
-	"INPUT_PROXY_PROTOCOL",
-	"INPUT_PROXY_USERNAME",
-	"INPUT_PROXY_PASSWORD",
-	"INPUT_PROXY_KEY",
-	"INPUT_PROXY_KEY_PATH",
-	"INPUT_PROXY_PASSPHRASE",
-	"INPUT_PROXY_FINGERPRINT",
-	"INPUT_PROXY_CIPHER",
-	"INPUT_PROXY_USE_INSECURE_CIPHER",
-	"INPUT_PROXY_TIMEOUT",
-	"INPUT_SCRIPT",
-	"INPUT_SCRIPT_PATH",
-	"INPUT_SCRIPT_STOP",
-	"INPUT_COMMAND_TIMEOUT",
-	"INPUT_ENVS",
-	"INPUT_ENVS_FORMAT",
-	"INPUT_ALLENVS",
-	"INPUT_REQUEST_PTY",
-	"INPUT_DEBUG",
-	"INPUT_CAPTURE_STDOUT",
-	"INPUT_WORKDIR",
-	"INPUT_CREATE_WORKDIR",
-	"INPUT_FILES",
+// flagInput is one action input a command line flag overrides. The flag name
+// drops the INPUT_ prefix and lower-cases the rest; a boolean input becomes a
+// switch that takes no argument. aliases are further inputs of the same setting
+// that the same flag overrides as well.
+type flagInput struct {
+	input   string
+	aliases []string
+	boolean bool
 }
 
-// boolInputs are the action inputs holding true or false; their flags are
-// switches that take no argument.
-var boolInputs = map[string]bool{
-	"INPUT_USE_INSECURE_CIPHER":       true,
-	"INPUT_SYNC":                      true,
-	"INPUT_PROXY_USE_INSECURE_CIPHER": true,
-	"INPUT_SCRIPT_STOP":               true,
-	"INPUT_ALLENVS":                   true,
-	"INPUT_REQUEST_PTY":               true,
-	"INPUT_DEBUG":                     true,
-	"INPUT_CAPTURE_STDOUT":            true,
-	"INPUT_CREATE_WORKDIR":            true,
+// flagInputs are the action inputs that command line flags can override.
+var flagInputs = []flagInput{
+	{input: "INPUT_HOST"},
+	{input: "INPUT_PORT"},
+	{input: "INPUT_PROTOCOL"},
+	{input: "INPUT_USERNAME"},
+	{input: "INPUT_PASSWORD"},
+	{input: "INPUT_KEY"},
+	{input: "INPUT_KEY_PATH"},
+	{input: "INPUT_PASSPHRASE"},
+	{input: "INPUT_FINGERPRINT"},
+	{input: "INPUT_CIPHER", aliases: []string{"INPUT_CIPHERS"}},
+	{input: "INPUT_USE_INSECURE_CIPHER", boolean: true},
+	{input: "INPUT_TIMEOUT"},
+	{input: "INPUT_SYNC", boolean: true},
+	{input: "INPUT_PROXY_HOST"},
+	{input: "INPUT_PROXY_PORT"},
+	{input: "INPUT_PROXY_PROTOCOL"},
+	{input: "INPUT_PROXY_USERNAME"},
+	{input: "INPUT_PROXY_PASSWORD"},
+	{input: "INPUT_PROXY_KEY"},
+	{input: "INPUT_PROXY_KEY_PATH"},
+	{input: "INPUT_PROXY_PASSPHRASE"},
+	{input: "INPUT_PROXY_FINGERPRINT"},
+	{input: "INPUT_PROXY_CIPHER"},
+	{input: "INPUT_PROXY_USE_INSECURE_CIPHER", boolean: true},
+	{input: "INPUT_PROXY_TIMEOUT"},
+	{input: "INPUT_SCRIPT"},
+	{input: "INPUT_SCRIPT_PATH"},
+	{input: "INPUT_SCRIPT_STOP", boolean: true},
+	{input: "INPUT_COMMAND_TIMEOUT"},
+	{input: "INPUT_ENVS"},
+	{input: "INPUT_ENVS_FORMAT"},
+	{input: "INPUT_ALLENVS", boolean: true},
+	{input: "INPUT_REQUEST_PTY", boolean: true},
+	{input: "INPUT_DEBUG", boolean: true},
+	{input: "INPUT_CAPTURE_STDOUT", boolean: true},
+	{input: "INPUT_WORKDIR"},
+	{input: "INPUT_CREATE_WORKDIR", boolean: true},
+	{input: "INPUT_FILES"},
 }
 
 func main() {
@@ -150,15 +145,30 @@ func parseFlags(args []string, lookup func(string) (string, bool), stderr io.Wri
 	fs.SetOutput(stderr)
 
 	flags := make(map[string]func() string, len(flagInputs))
+	owners := make(map[string]string, len(flagInputs))
+	given := make(map[string]bool, len(flagInputs))
 	for _, input := range flagInputs {
-		name := flagName(input)
-		if boolInputs[input] {
-			value := fs.Bool(name, false, "override "+input)
-			flags[input] = func() string { return strconv.FormatBool(*value) }
+		names := append([]string{input.input}, input.aliases...)
+		for _, name := range names {
+			owners[flagName(name)] = input.input
+		}
+		if input.boolean {
+			value := fs.Bool(flagName(input.input), false, "override "+input.input)
+			for _, alias := range input.aliases {
+				fs.BoolVar(value, flagName(alias), false, "override "+input.input)
+			}
+			for _, name := range names {
+				flags[name] = func() string { return strconv.FormatBool(*value) }
+			}
 			continue
 		}
-		value := fs.String(name, "", "override "+input)
-		flags[input] = func() string { return *value }
+		value := fs.String(flagName(input.input), "", "override "+input.input)
+		for _, alias := range input.aliases {
+			fs.StringVar(value, flagName(alias), "", "override "+input.input)
+		}
+		for _, name := range names {
+			flags[name] = func() string { return *value }
+		}
 	}
 	showVersion := fs.Bool("version", false, "print the version and exit")
 
@@ -171,11 +181,15 @@ func parseFlags(args []string, lookup func(string) (string, bool), stderr io.Wri
 		return nil, false, err
 	}
 
-	set := make(map[string]bool, len(flags))
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	fs.Visit(func(f *flag.Flag) {
+		if input, ok := owners[f.Name]; ok {
+			given[input] = true
+		}
+	})
 
 	inputs := func(name string) (string, bool) {
-		if value, ok := flags[name]; ok && set[flagName(name)] {
+		value, ok := flags[name]
+		if ok && given[owners[flagName(name)]] {
 			return value(), true
 		}
 		return lookup(name)
