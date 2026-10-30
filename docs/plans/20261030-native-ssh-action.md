@@ -433,11 +433,12 @@ composite action, который его распаковывает и запус
 - Modify: `README.md`
 - Create: `LICENSE`
 
-- [ ] README: установка, полный список входов с дефолтами, примеры (пароль, ключ, proxy, multi-host, envs, capture_stdout)
-- [ ] README: примеры `workdir`, `create_workdir` и `files` (деплой артефактов: создание каталога релиза, копирование `dist/*`, затем скрипт уже в нём), включая ограничение «glob без `**`»
-- [ ] README: раздел «Migrating from appleboy/ssh-action» — замена `uses:`, выпавшие `version`/`curl_insecure`, оба имени `cipher`/`ciphers`
-- [ ] README: отклонения из раздела «Известные отклонения» и ограничения (linux amd64/arm64, нет keepalive/SIGTERM, неатомарная загрузка, `allenvs` отправляет `INPUT_KEY`/`INPUT_PASSWORD`/`GITHUB_TOKEN`)
-- [ ] `LICENSE` MIT + attribution `drone-ssh`/`easyssh-proxy`; README: процесс релиза и как обновлять `dist/`
+- [x] README: установка, полный список входов с дефолтами, примеры (пароль, ключ, proxy, multi-host, envs, capture_stdout)
+- [x] README: примеры `workdir`, `create_workdir` и `files` (деплой артефактов: создание каталога релиза, копирование `dist/*`, затем скрипт уже в нём), включая ограничение «glob без `**`»
+- [x] README: раздел «Migrating from appleboy/ssh-action» — замена `uses:`, выпавшие `version`/`curl_insecure`, оба имени `cipher`/`ciphers`
+- [x] README: отклонения из раздела «Известные отклонения» и ограничения (linux amd64/arm64, нет keepalive/SIGTERM, неатомарная загрузка, `allenvs` отправляет `INPUT_KEY`/`INPUT_PASSWORD`/`GITHUB_TOKEN`)
+- [x] `LICENSE` MIT + attribution `drone-ssh`/`easyssh-proxy`; README: процесс релиза и как обновлять `dist/`
+- [x] ➕ `tests/entrypoint_test.sh`: таблицы входов README сверяются с `action.yml` (имена и дефолты), наличие разделов миграции, ограничения `**`, `LICENSE` — документация не расходится с кодом незаметно
 
 ### Task 15: Verify acceptance criteria
 

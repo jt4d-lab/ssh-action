@@ -1,8 +1,9 @@
 #!/bin/sh
 # Tests of action/entrypoint.sh: architecture selection, unpacking of the dist
-# archive, the capture_stdout output and the input mapping of action.yml. Every
-# case builds a throwaway copy of the action tree, so the committed dist archive
-# is not needed and nothing touches the repository.
+# archive, the capture_stdout output, the input mapping of action.yml and the
+# inputs and defaults README.md documents. Every case builds a throwaway copy of
+# the action tree, so the committed dist archive is not needed and nothing
+# touches the repository.
 set -eu
 
 repo_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -234,6 +235,62 @@ test_action_definition() {
 	check_equal "action.yml: env name matches the input name" "" "$mismatched"
 }
 
+# documented_defaults prints the name<TAB>default pairs of the README inputs
+# tables, one per row, and of action.yml, one per input. A row of a table that is
+# not an inputs table (the outputs one) is skipped because its second cell is not
+# a default value.
+documented_defaults() {
+	awk -F'|' '
+		/^\| `/ {
+			if ($3 !~ /^ — $/ && $3 !~ /^ `[^`]*` $/) next
+			name = $2
+			def = $3
+			gsub(/`/, "", name)
+			gsub(/ /, "", name)
+			gsub(/`/, "", def)
+			sub(/^[ \t]+/, "", def)
+			sub(/[ \t]+$/, "", def)
+			if (def == "—") def = ""
+			print name "\t" def
+		}' "$1"
+}
+
+action_defaults() {
+	awk '
+		/^inputs:/ { in_inputs = 1; next }
+		/^[a-z_]+:/ { in_inputs = 0; next }
+		in_inputs && /^  [a-z_]+:$/ {
+			n++
+			order[n] = substr($1, 1, length($1) - 1)
+		}
+		in_inputs && /^    default:/ {
+			value = $0
+			sub(/^    default:[ \t]*/, "", value)
+			gsub(/"/, "", value)
+			defaults[order[n]] = value
+		}
+		END {
+			for (i = 1; i <= n; i++) print order[i] "\t" defaults[order[i]]
+		}' "$1"
+}
+
+test_documentation() {
+	readme=$repo_dir/README.md
+
+	from_readme=$(documented_defaults "$readme" | sort)
+	from_action=$(action_defaults "$repo_dir/action.yml" | sort)
+	check_equal "README: every action input with its default is documented" \
+		"$from_action" "$from_readme"
+
+	check_contains "README: migration section" "$readme" "## Migrating from appleboy/ssh-action"
+	check_contains "README: dropped curl_insecure input" "$readme" "curl_insecure"
+	check_contains "README: files does not expand **" "$readme" '`**` is not supported'
+	check_contains "README: allenvs forwards GITHUB_TOKEN" "$readme" "GITHUB_TOKEN"
+
+	check_contains "LICENSE: MIT" "$repo_dir/LICENSE" "MIT License"
+	check_contains "LICENSE: easyssh-proxy attribution" "$repo_dir/LICENSE" "easyssh-proxy"
+}
+
 test_architecture_selection
 test_unknown_architecture
 test_missing_archive
@@ -244,6 +301,7 @@ test_capture_stdout_keeps_failure
 test_capture_stdout_without_final_newline
 test_capture_disabled
 test_action_definition
+test_documentation
 
 printf '%s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ] || exit 1
