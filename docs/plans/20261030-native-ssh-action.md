@@ -418,13 +418,14 @@ composite action, который его распаковывает и запус
 
 **Files:**
 - Create: `.github/workflows/release.yml`
-- Modify: `Makefile`
+- Modify: `Makefile`, `README.md`, `tests/dist_test.sh`, `.github/workflows/ci.yml`, `.gitea/workflows/ci.yml`
 
-- [ ] `release.yml` на тег: `make dist`, проверка что версия в бинаре равна тегу, падение при расхождении
-- [ ] `release.yml`: проверка `checksums.txt` после сборки (закоммиченные файлы против пересобранных)
-- [ ] тест-сценарий в `tests/dist_test.sh` для режима `release-check` (подмена версии ловится)
-- [ ] задокументировать порядок релиза в `Makefile` (`dist`, `release-check`) и в README
-- [ ] проверить прогон `make release-check` на текущем дереве — зелёный
+- [x] `release.yml` на тег: `make dist`, проверка что версия в бинаре равна тегу, падение при расхождении
+- [x] `release.yml`: проверка `checksums.txt` после сборки (закоммиченные файлы против пересобранных)
+- [x] тест-сценарий в `tests/dist_test.sh` для режима `release-check` (подмена версии ловится)
+- [x] задокументировать порядок релиза в `Makefile` (`dist`, `release-check`) и в README
+- [x] проверить прогон `make release-check` на текущем дереве — зелёный
+- [x] ➕ `fetch-depth: 0` в job'е `test` обоих workflow'ов CI: при shallow-клоне после первого тега `git describe` в `make dist` падает, свежая сборка получает `dev` и `release-check` ложно падает на каждом push
 
 ### Task 14: README и миграция
 

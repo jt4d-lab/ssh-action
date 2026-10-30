@@ -20,6 +20,12 @@ lint:
 	go vet ./...
 	shellcheck action/entrypoint.sh tests/entrypoint_test.sh tests/dist_test.sh
 
+# Release order for vX.Y.Z: VER=vX.Y.Z make dist, commit dist/, tag that commit
+# and push the tag. .github/workflows/release.yml then rebuilds at the tag and
+# fails unless the committed dist/ is byte identical and the binaries report
+# vX.Y.Z; make release-check is the same comparison against a scratch build and
+# is worth running locally before the tag.
+#
 # dist holds the two committed static linux binaries that entrypoint.sh unpacks.
 dist:
 	mkdir -p $(DIST_DIR)

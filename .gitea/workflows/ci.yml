@@ -20,6 +20,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # make release-check rebuilds with the VER that git describe resolves,
+          # so the tags of the released commits have to be in the clone.
+          fetch-depth: 0
       - name: Unit tests
         run: make test
       - name: Vet and shellcheck
