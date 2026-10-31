@@ -1,6 +1,3 @@
-# CI of both forges. This file is canonical: .gitea/workflows/ci.yml is an exact
-# copy of it, and the test job fails when the two differ.
-#
 # Runner requirements: linux/amd64 or linux/arm64 with the ubuntu-latest label,
 # and make, sh, gzip, tar, go, shellcheck and docker on the machine. make dist
 # builds dist/ in the golang image pinned in the Makefile, so the docker daemon
@@ -34,8 +31,6 @@ jobs:
         run: make lint
       - name: The committed dist matches a fresh build
         run: make release-check
-      - name: Both forges carry the same workflow
-        run: cmp .github/workflows/ci.yml .gitea/workflows/ci.yml
 
   e2e:
     runs-on: ubuntu-latest

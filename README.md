@@ -408,8 +408,6 @@ Conventions that a test or a CI step keeps in place:
   commit; `make release-check` compares the committed archives against a build
   in the same image and fails on a drift, which is what makes a forgotten
   `make dist` visible.
-- `.gitea/workflows/ci.yml` is a byte-identical copy of
-  `.github/workflows/ci.yml`; the `test` job fails when `cmp` finds a difference.
 - The input tables of this README are checked against `action.yml` by
   `test_documentation` in `tests/entrypoint_test.sh`, so a new input needs its
   row with the default in the same commit.
