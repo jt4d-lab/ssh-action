@@ -2,15 +2,19 @@
 # copy of it, and the test job fails when the two differ.
 #
 # Runner requirements: linux/amd64 or linux/arm64 with the ubuntu-latest label,
-# and make, sh, gzip, tar, go (the toolchain of go.mod) and shellcheck on the
-# machine. actions/checkout is the only node based action here: the action under
-# test needs no docker and no node, because the SSH hosts of the e2e job are
-# ./testserver processes on the runner itself and the files are copied with the
-# real sh and tar of that machine.
+# and make, sh, gzip, tar, go, shellcheck and docker on the machine. make dist
+# builds dist/ in the golang image pinned in the Makefile, so the docker daemon
+# has to be reachable from the job. actions/checkout is the only node based
+# action here: the action under test needs no docker and no node, because the
+# SSH hosts of the e2e job are ./testserver processes on the runner itself and
+# the files are copied with the real sh and tar of that machine.
 name: CI
 
 on:
+  # Branches reach CI through pull_request; an unfiltered push would run the same
+  # workflow a second time for every branch that has an open pull request.
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 

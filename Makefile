@@ -8,6 +8,26 @@ ARCHES = amd64 arm64
 # DIST_DIR lets release-check build the same artifacts outside dist/.
 DIST_DIR ?= dist
 
+# dist/ is byte identical only within one compiler build and one gzip: a go of
+# the same version from another vendor emits other code, so the archives come
+# from this image and from nowhere else. DIST_IN_IMAGE marks the run inside the
+# image, where the build itself happens, and the digest pins the bytes of the
+# image itself.
+DIST_IMAGE ?= golang:1.26.8@sha256:eb36c1664dd974cde625f736e02c204383deebe03977365caaec5bf49f794348
+DIST_IN_IMAGE ?= 0
+DOCKER ?= docker
+# release-check builds into the repository because the image sees only it.
+DIST_SCRATCH ?= .release-check-dist
+
+# The build runs as the calling user so that the artifacts it leaves behind
+# belong to that user; the caches live for one run inside the container.
+DIST_RUN = $(DOCKER) run --rm \
+	--user $(shell id -u):$(shell id -g) \
+	-e HOME=/tmp -e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomodcache \
+	-e VER=$(VER) \
+	-v "$(CURDIR)":/src -w /src \
+	$(DIST_IMAGE)
+
 .PHONY: build test lint dist release-check
 
 build:
@@ -28,25 +48,31 @@ lint:
 #
 # dist holds the two committed static linux binaries that entrypoint.sh unpacks.
 dist:
+ifeq ($(DIST_IN_IMAGE),1)
 	mkdir -p $(DIST_DIR)
-	@for arch in $(ARCHES); do \
-		echo "building linux/$$arch $(VER)"; \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/linux-$$arch ./cmd/ssh-action || exit 1; \
-		gzip -9n -c $(DIST_DIR)/linux-$$arch >$(DIST_DIR)/linux-$$arch.gz || exit 1; \
+	@set -eu; \
+	printf 'toolchain %s\n' "$$(go env GOVERSION)"; \
+	for arch in $(ARCHES); do \
+		printf 'building linux/%s %s\n' "$$arch" "$(VER)"; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/linux-$$arch ./cmd/ssh-action; \
+		gzip -9n -c $(DIST_DIR)/linux-$$arch >$(DIST_DIR)/linux-$$arch.gz; \
 		rm -f $(DIST_DIR)/linux-$$arch; \
 	done
 	cd $(DIST_DIR) && sha256sum linux-amd64.gz linux-arm64.gz >checksums.txt
+else
+	@$(DIST_RUN) make --no-print-directory dist DIST_IN_IMAGE=1 DIST_DIR="$(DIST_DIR)"
+endif
 
 # release-check rebuilds the binaries into a scratch directory and compares the
 # checksums, so a stale committed dist/ or a source change without make dist
 # fails before a release is tagged.
 release-check:
 	@set -eu; \
-	scratch=$$(mktemp -d); \
-	trap 'rm -rf "$$scratch"' EXIT; \
-	$(MAKE) --no-print-directory dist DIST_DIR="$$scratch"; \
-	cmp dist/checksums.txt "$$scratch/checksums.txt" || { \
+	trap 'rm -rf "$(DIST_SCRATCH)"' EXIT; \
+	$(MAKE) --no-print-directory dist DIST_DIR="$(DIST_SCRATCH)"; \
+	cmp dist/checksums.txt "$(DIST_SCRATCH)/checksums.txt" || { \
 		echo "release-check: dist/ differs from a fresh build, run make dist" >&2; \
+		diff -u dist/checksums.txt "$(DIST_SCRATCH)/checksums.txt" >&2 || true; \
 		exit 1; \
 	}; \
 	echo "release-check: dist/ matches a fresh build"

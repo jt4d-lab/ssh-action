@@ -125,7 +125,7 @@ test_artifacts_present() {
 }
 
 test_release_check() {
-	for tool in make go; do
+	for tool in make go docker; do
 		if ! command -v "$tool" >/dev/null 2>&1; then
 			printf 'skip - release-check: %s is not available\n' "$tool" >&2
 			return 0

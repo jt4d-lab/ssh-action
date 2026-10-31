@@ -361,7 +361,10 @@ nothing is uploaded anywhere.
 
 `make release-check` is that same byte comparison against a scratch build, so it
 is the check to run locally before tagging; CI runs it on every push, which means
-a stale `dist/` fails long before a release.
+a stale `dist/` fails long before a release. Both `make dist` and
+`make release-check` build inside the `golang` image pinned in the `Makefile`
+(docker), because archives built by another go — even of the same version —
+differ byte for byte.
 
 `sh tests/dist_test.sh` verifies the committed artifacts (checksums, ELF
 architecture, static linking, version of the runner-architecture binary);
@@ -400,10 +403,11 @@ real `sh` and `tar` of the machine and stops on `SIGINT` or `SIGTERM`.
 
 Conventions that a test or a CI step keeps in place:
 
-- `dist/` is built with `-trimpath -buildvcs=false`, so that one source gives
-  byte-identical archives in any commit; `make release-check` compares the
-  committed archives against a scratch build and fails on a drift, which is what
-  makes a forgotten `make dist` visible.
+- `dist/` is built inside the pinned `golang` image with `-trimpath
+  -buildvcs=false`, so that one source gives byte-identical archives in any
+  commit; `make release-check` compares the committed archives against a build
+  in the same image and fails on a drift, which is what makes a forgotten
+  `make dist` visible.
 - `.gitea/workflows/ci.yml` is a byte-identical copy of
   `.github/workflows/ci.yml`; the `test` job fails when `cmp` finds a difference.
 - The input tables of this README are checked against `action.yml` by
