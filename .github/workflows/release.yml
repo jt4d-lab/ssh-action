@@ -1,0 +1,42 @@
+# Release gate. Nothing is uploaded: the action is consumed by checking this
+# repository out at a ref, so a tag is the release, provided the commit it points
+# at carries the dist/ that was built from that same version.
+#
+# Release order (also in the README): VER=vX.Y.Z make dist, commit dist/, then
+# tag that commit vX.Y.Z and push. This workflow runs on the tag and fails when
+# the committed artifacts are not what a build of the tagged source produces or
+# when the binaries report another version.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Same version the release commit must have baked into dist/: make dist
+      # resolves VER from the environment before it falls back to git describe.
+      VER: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rebuild dist/ from the tagged source
+        run: make dist
+
+      - name: The committed binaries and checksums are that rebuild
+        run: |
+          set -eu
+          changed=$(git status --porcelain -- dist)
+          if [ -n "$changed" ]; then
+            printf '%s\n' "$changed" >&2
+            printf 'dist/ is not a build of %s: rebuild it with VER=%s make dist and commit it before tagging\n' \
+              "$VER" "$VER" >&2
+            exit 1
+          fi
+
+      - name: The binaries report the tag as their version
+        run: sh tests/dist_test.sh

@@ -1,0 +1,417 @@
+package main
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/jt4d-lab/ssh-action/internal/config"
+	"github.com/jt4d-lab/ssh-action/internal/sshtest"
+)
+
+const testPassword = "s3cret"
+
+func startServer(t *testing.T, handler sshtest.Handler) *sshtest.Server {
+	t.Helper()
+	srv, err := sshtest.NewServer(sshtest.Options{Password: testPassword, Handler: handler})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	return srv
+}
+
+// inputs returns the lookup of a password-authenticated run against srv with
+// extra entries, env values like SECRET included, merged into it.
+func inputs(srv *sshtest.Server, extra map[string]string) func(string) (string, bool) {
+	vars := map[string]string{
+		"INPUT_HOST":            srv.Addr(),
+		"INPUT_USERNAME":        "tester",
+		"INPUT_PASSWORD":        testPassword,
+		"INPUT_TIMEOUT":         "5s",
+		"INPUT_COMMAND_TIMEOUT": "10s",
+		"INPUT_SCRIPT":          "test -f /dev/null",
+	}
+	for name, value := range extra {
+		vars[name] = value
+	}
+	return func(name string) (string, bool) {
+		v, ok := vars[name]
+		return v, ok
+	}
+}
+
+func TestRunSuccess(t *testing.T) {
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, "hello\n")
+		return 0
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, nil), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "hello\n") {
+		t.Errorf("stdout = %q, want the remote output", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Successfully executed commands to all hosts") {
+		t.Errorf("stderr = %q, want the success summary", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "Successfully") {
+		t.Errorf("stdout = %q, want service messages kept off stdout", stdout.String())
+	}
+}
+
+func TestRunCommandFailure(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 3 })
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, nil), &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, stderr.String())
+	}
+	for _, want := range []string{srv.Addr(), "status 3"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr %q does not contain %q", stderr.String(), want)
+		}
+	}
+	if strings.Contains(stderr.String(), "Successfully") {
+		t.Errorf("stderr = %q, want no success summary after a failure", stderr.String())
+	}
+}
+
+func TestRunInvalidConfig(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+	lookup := inputs(srv, nil)
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, func(name string) (string, bool) {
+		if name != "INPUT_PASSWORD" {
+			return lookup(name)
+		}
+		return "", false
+	}, &stdout, &stderr)
+	if code != exitConfig {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitConfig, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "missing password") {
+		t.Errorf("stderr = %q, want the validation error", stderr.String())
+	}
+}
+
+func TestRunUnmatchedFilesIsConfigError(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{
+		"INPUT_WORKDIR": "/srv/app",
+		"INPUT_FILES":   "no-such-artifact-*.tar",
+	}), &stdout, &stderr)
+	if code != exitConfig {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitConfig, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no match") {
+		t.Errorf("stderr = %q, want the unmatched pattern error", stderr.String())
+	}
+}
+
+func TestRunCopyConfigErrors(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		wantMsg string
+	}{
+		{
+			name:    "files without workdir",
+			vars:    map[string]string{"INPUT_FILES": "dist/*"},
+			wantMsg: "files requires workdir",
+		},
+		{
+			name:    "foreign home in workdir",
+			vars:    map[string]string{"INPUT_WORKDIR": "~bob/app"},
+			wantMsg: "only the current user home",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(nil, inputs(srv, tt.vars), &stdout, &stderr)
+			if code != exitConfig {
+				t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitConfig, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantMsg) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantMsg)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing on a broken configuration", stdout.String())
+			}
+		})
+	}
+}
+
+func TestRunCapturesStdoutOfFailingCommand(t *testing.T) {
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, "before failure\n")
+		_, _ = io.WriteString(sess.Stderr, "remote warning\n")
+		return 7
+	})
+	path := t.TempDir() + "/stdout"
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{stdoutFileEnv: path}), &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "before failure\n") {
+		t.Errorf("stdout = %q, want the remote output to stay live", stdout.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != "before failure\n" {
+		t.Errorf("%s = %q, want the remote stdout only", path, data)
+	}
+	if !strings.Contains(stderr.String(), "remote warning\n") || !strings.Contains(stderr.String(), "status 7") {
+		t.Errorf("stderr = %q, want the remote stderr and the exit status", stderr.String())
+	}
+}
+
+func TestRunVersion(t *testing.T) {
+	original := version
+	version = "v1.2.3"
+	t.Cleanup(func() { version = original })
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--version"}, func(string) (string, bool) { return "", false }, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), version) {
+		t.Errorf("stdout = %q, want the version %q", stdout.String(), version)
+	}
+}
+
+func TestRunFlagOverridesInput(t *testing.T) {
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, sess.Command+"\n")
+		return 0
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--script", "echo flagged"}, inputs(srv, map[string]string{
+		"INPUT_SCRIPT": "echo from-env",
+	}), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "echo flagged") {
+		t.Errorf("stdout = %q, want the --script text", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "echo from-env") {
+		t.Errorf("stdout = %q, want INPUT_SCRIPT overridden by --script", stdout.String())
+	}
+}
+
+func TestRunUnknownFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--no-such-flag"}, func(string) (string, bool) { return "", false }, &stdout, &stderr)
+	if code != exitConfig {
+		t.Fatalf("exit code = %d, want %d", code, exitConfig)
+	}
+	if !strings.Contains(stderr.String(), "no-such-flag") {
+		t.Errorf("stderr = %q, want the flag error", stderr.String())
+	}
+}
+
+// TestFlagInputsCoverFromEnv compares the flag table with the inputs
+// config.FromEnv reads, so an input cannot work in a step and fail on the command
+// line, and checks that every flag parses.
+func TestFlagInputsCoverFromEnv(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "internal", "config", "config.go"))
+	if err != nil {
+		t.Fatalf("read config.go: %v", err)
+	}
+	read := make(map[string]bool)
+	for _, name := range regexp.MustCompile(`INPUT_[A-Z0-9_]+`).FindAllString(string(source), -1) {
+		read[name] = true
+	}
+	flagged := make(map[string]flagInput, len(flagInputs))
+	for _, input := range flagInputs {
+		flagged[input.input] = input
+		for _, alias := range input.aliases {
+			flagged[alias] = input
+		}
+	}
+
+	lookup := func(string) (string, bool) { return "", false }
+	for name := range read {
+		input, ok := flagged[name]
+		if !ok {
+			t.Errorf("%s has no command line flag", name)
+			continue
+		}
+		args := []string{"--" + flagName(name)}
+		if !input.boolean {
+			args[0] += "=value"
+		}
+		if _, _, err := parseFlags(args, lookup, io.Discard); err != nil {
+			t.Errorf("--%s: %v", flagName(name), err)
+		}
+	}
+	for name := range flagged {
+		if !read[name] {
+			t.Errorf("flag --%s overrides an input config.FromEnv does not read", flagName(name))
+		}
+	}
+}
+
+// TestParseFlagsCipherOverridesBothSpellings checks the documented precedence for
+// the cipher input, which config.FromEnv reads under two names: a flag given in
+// either spelling wins over the environment.
+func TestParseFlagsCipherOverridesBothSpellings(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{name: "ciphers flag over INPUT_CIPHER", args: []string{"--ciphers=aes256-ctr"}, env: map[string]string{"INPUT_CIPHER": "aes128-ctr"}, want: "aes256-ctr"},
+		{name: "cipher flag over INPUT_CIPHERS", args: []string{"--cipher=aes256-ctr"}, env: map[string]string{"INPUT_CIPHERS": "aes128-ctr"}, want: "aes256-ctr"},
+		{name: "environment only", env: map[string]string{"INPUT_CIPHERS": "aes128-ctr"}, want: "aes128-ctr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vars := map[string]string{
+				"INPUT_HOST":     "127.0.0.1",
+				"INPUT_PASSWORD": testPassword,
+				"INPUT_SCRIPT":   "true",
+			}
+			for name, value := range tt.env {
+				vars[name] = value
+			}
+
+			inputs, _, err := parseFlags(tt.args, func(name string) (string, bool) {
+				value, ok := vars[name]
+				return value, ok
+			}, io.Discard)
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			cfg, err := config.FromEnv(inputs)
+			if err != nil {
+				t.Fatalf("FromEnv: %v", err)
+			}
+			if got := strings.Join(cfg.Ciphers, ","); got != tt.want {
+				t.Errorf("ciphers = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunRejectsPositionalArguments(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"extra"}, func(string) (string, bool) { return "", false }, &stdout, &stderr)
+	if code != exitConfig {
+		t.Fatalf("exit code = %d, want %d", code, exitConfig)
+	}
+	if !strings.Contains(stderr.String(), "unexpected arguments") {
+		t.Errorf("stderr = %q, want the argument error", stderr.String())
+	}
+}
+
+func TestRunCaptureFileFailure(t *testing.T) {
+	srv := startServer(t, func(*sshtest.Session) int { return 0 })
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{
+		stdoutFileEnv: filepath.Join(t.TempDir(), "missing", "stdout"),
+	}), &stdout, &stderr)
+	if code != exitFailure {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitFailure, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "capture stdout:") {
+		t.Errorf("stderr = %q, want the capture error", stderr.String())
+	}
+}
+
+func TestRunForwardsAllEnvs(t *testing.T) {
+	t.Setenv("PLUGIN_TOKEN", "tok-123")
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, sess.Command+"\n")
+		return 0
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{"INPUT_ALLENVS": "true"}), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "export PLUGIN_TOKEN='tok-123'") {
+		t.Errorf("stdout = %q, want the forwarded variable", stdout.String())
+	}
+}
+
+func TestRunDebugHidesSecrets(t *testing.T) {
+	const envValue = "super-secret-env-value"
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, "hello\n")
+		return 0
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--debug"}, inputs(srv, map[string]string{
+		"INPUT_ENVS": "SECRET",
+		"SECRET":     envValue,
+	}), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "password: [REDACTED]") {
+		t.Errorf("stderr = %q, want the redacted password", stderr.String())
+	}
+	if strings.Contains(stderr.String(), testPassword) {
+		t.Errorf("stderr = %q, leaks the password", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "envs: SECRET") {
+		t.Errorf("stderr = %q, want the env names", stderr.String())
+	}
+	if strings.Contains(stderr.String(), envValue) {
+		t.Errorf("stderr = %q, leaks the env value", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "hello\n") || strings.Contains(stdout.String(), "password:") {
+		t.Errorf("stdout = %q, want the remote output only", stdout.String())
+	}
+}
+
+func TestRunCapturesRemoteStdoutToFile(t *testing.T) {
+	srv := startServer(t, func(sess *sshtest.Session) int {
+		_, _ = io.WriteString(sess.Stdout, "captured\n")
+		return 0
+	})
+	path := t.TempDir() + "/stdout"
+
+	var stdout, stderr bytes.Buffer
+	code := run(nil, inputs(srv, map[string]string{stdoutFileEnv: path}), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "captured\n") {
+		t.Errorf("stdout = %q, want the remote output to stay live", stdout.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != "captured\n" {
+		t.Errorf("%s = %q, want the remote output only", path, data)
+	}
+}

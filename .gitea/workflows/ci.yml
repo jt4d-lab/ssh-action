@@ -1,0 +1,315 @@
+# CI of both forges. This file is canonical: .gitea/workflows/ci.yml is an exact
+# copy of it, and the test job fails when the two differ.
+#
+# Runner requirements: linux/amd64 or linux/arm64 with the ubuntu-latest label,
+# and make, sh, gzip, tar, go, shellcheck and docker on the machine. make dist
+# builds dist/ in the golang image pinned in the Makefile, so the docker daemon
+# has to be reachable from the job. actions/checkout is the only node based
+# action here: the action under test needs no docker and no node, because the
+# SSH hosts of the e2e job are ./testserver processes on the runner itself and
+# the files are copied with the real sh and tar of that machine.
+name: CI
+
+on:
+  # Branches reach CI through pull_request; an unfiltered push would run the same
+  # workflow a second time for every branch that has an open pull request.
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # make release-check rebuilds with the VER that git describe resolves,
+          # so the tags of the released commits have to be in the clone.
+          fetch-depth: 0
+      - name: Unit tests
+        run: make test
+      - name: Vet and shellcheck
+        run: make lint
+      - name: The committed dist matches a fresh build
+        run: make release-check
+      - name: Both forges carry the same workflow
+        run: cmp .github/workflows/ci.yml .gitea/workflows/ci.yml
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      E2E_PASSWORD: e2e-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the test server
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/ssh-action-e2e"
+          go build -o "$RUNNER_TEMP/ssh-action-e2e/testserver" ./testserver
+
+      - name: Start the jump host and two targets
+        id: servers
+        run: |
+          set -eu
+          dir=$RUNNER_TEMP/ssh-action-e2e
+
+          start() {
+            name=$1
+            shift
+            "$dir/testserver" "$@" >"$dir/$name.info" 2>"$dir/$name.log" &
+            printf '%s\n' "$!" >"$dir/$name.pid"
+            tries=0
+            while [ ! -s "$dir/$name.info" ]; do
+              tries=$((tries + 1))
+              if [ "$tries" -gt 100 ]; then
+                printf 'test server %s did not start:\n' "$name" >&2
+                cat "$dir/$name.log" >&2
+                exit 1
+              fi
+              sleep 0.1
+            done
+          }
+
+          start jump -addr 127.0.0.1:2200 -password "$E2E_PASSWORD" -jump
+          start target1 -addr 127.0.0.1:2201 -password "$E2E_PASSWORD" -client-key "$dir/client_ed25519"
+          start target2 -addr 127.0.0.1:2202 -password "$E2E_PASSWORD" -client-key "$dir/client_ed25519"
+
+          for name in jump target1 target2; do
+            printf '%s: %s\n' "$name" "$(sed -n 's/^addr=//p' "$dir/$name.info")"
+          done
+
+          {
+            printf 'target1_fingerprint=%s\n' "$(sed -n 's/^fingerprint=//p' "$dir/target1.info")"
+            printf 'jump_fingerprint=%s\n' "$(sed -n 's/^fingerprint=//p' "$dir/jump.info")"
+            printf 'client_key=%s\n' "$dir/client_ed25519"
+            printf 'client_key_pem<<SSH_ACTION_KEY_EOF\n'
+            cat "$dir/client_ed25519"
+            printf 'SSH_ACTION_KEY_EOF\n'
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Create the local files to copy
+        run: |
+          set -eu
+          dir=$RUNNER_TEMP/ssh-action-e2e/files
+          rm -rf "$dir"
+          mkdir -p "$dir/app" "$dir/dist"
+          printf '#!/bin/sh\nprintf "deployed v1\\n"\n' >"$dir/app/deploy.sh"
+          chmod 0755 "$dir/app/deploy.sh"
+          printf 'mode=production\n' >"$dir/app/config.txt"
+          chmod 0644 "$dir/app/config.txt"
+          printf 'one\n' >"$dir/dist/one.txt"
+          printf 'two\n' >"$dir/dist/two.txt"
+
+      - name: Password authentication with a pinned fingerprint
+        id: password
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          fingerprint: ${{ steps.servers.outputs.target1_fingerprint }}
+          capture_stdout: "true"
+          script: printf 'password auth ok\n'
+
+      - name: Check the password run
+        env:
+          STDOUT: ${{ steps.password.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF 'password auth ok'
+
+      - name: Key authentication with the key content
+        id: key
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          key: ${{ steps.servers.outputs.client_key_pem }}
+          capture_stdout: "true"
+          script: printf 'key auth ok\n'
+
+      - name: Check the key content run
+        env:
+          STDOUT: ${{ steps.key.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF 'key auth ok'
+
+      - name: Key authentication with a key file
+        id: key_path
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          key_path: ${{ steps.servers.outputs.client_key }}
+          capture_stdout: "true"
+          script: printf 'key file auth ok\n'
+
+      - name: Check the key file run
+        env:
+          STDOUT: ${{ steps.key_path.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF 'key file auth ok'
+
+      - name: Reaching the host through the jump host
+        id: proxy
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          fingerprint: ${{ steps.servers.outputs.target1_fingerprint }}
+          proxy_host: 127.0.0.1
+          proxy_port: "2200"
+          proxy_username: root
+          proxy_password: ${{ env.E2E_PASSWORD }}
+          proxy_fingerprint: ${{ steps.servers.outputs.jump_fingerprint }}
+          capture_stdout: "true"
+          script: printf 'through the jump ok\n'
+
+      - name: Check the jump host run
+        env:
+          STDOUT: ${{ steps.proxy.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF 'through the jump ok'
+
+      # A wrong jump password proves the run really goes through the jump host
+      # instead of connecting to the target directly.
+      - name: A wrong jump password fails the run
+        id: proxy_failure
+        continue-on-error: true
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          proxy_host: 127.0.0.1
+          proxy_port: "2200"
+          proxy_username: root
+          proxy_password: wrong-password
+          script: printf 'must not run\n'
+
+      - name: Check the jump failure
+        env:
+          OUTCOME: ${{ steps.proxy_failure.outcome }}
+        run: |
+          set -eu
+          [ "$OUTCOME" = failure ] || { printf 'a wrong jump password did not fail the run, outcome was %s\n' "$OUTCOME" >&2; exit 1; }
+
+      - name: capture_stdout keeps the exit status of a failing command
+        id: failing
+        continue-on-error: true
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          capture_stdout: "true"
+          script: |
+            printf 'remote failing line\n'
+            exit 7
+
+      - name: Check the failing capture_stdout run
+        env:
+          OUTCOME: ${{ steps.failing.outcome }}
+          STDOUT: ${{ steps.failing.outputs.stdout }}
+        run: |
+          set -eu
+          [ "$OUTCOME" = failure ] || { printf 'capture_stdout did not fail the step, outcome was %s\n' "$OUTCOME" >&2; exit 1; }
+          printf '%s\n' "$STDOUT" | grep -qxF 'remote failing line'
+
+      - name: script_stop stops on the first failing line
+        id: script_stop
+        continue-on-error: true
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          script_stop: "true"
+          capture_stdout: "true"
+          script: |
+            printf 'before stop\n'
+            false
+            printf 'after stop\n'
+
+      - name: Check the script_stop run
+        env:
+          OUTCOME: ${{ steps.script_stop.outcome }}
+          STDOUT: ${{ steps.script_stop.outputs.stdout }}
+        run: |
+          set -eu
+          [ "$OUTCOME" = failure ] || { printf 'script_stop did not fail the step, outcome was %s\n' "$OUTCOME" >&2; exit 1; }
+          printf '%s\n' "$STDOUT" | grep -qxF 'before stop'
+          if printf '%s\n' "$STDOUT" | grep -qxF 'after stop'; then
+            printf 'script_stop ran the lines after the failing one\n' >&2
+            exit 1
+          fi
+
+      - name: Two hosts on two ports
+        id: multi
+        uses: ./
+        with:
+          host: 127.0.0.1:2201,127.0.0.1:2202
+          password: ${{ env.E2E_PASSWORD }}
+          capture_stdout: "true"
+          script: printf 'multi host ok\n'
+
+      - name: Check the multi host run
+        env:
+          STDOUT: ${{ steps.multi.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF '127.0.0.1:2201: multi host ok'
+          printf '%s\n' "$STDOUT" | grep -qxF '127.0.0.1:2202: multi host ok'
+
+      - name: Files into a workdir with a space in its path
+        id: files
+        uses: ./
+        with:
+          host: 127.0.0.1:2201
+          password: ${{ env.E2E_PASSWORD }}
+          workdir: ${{ runner.temp }}/ssh-action-e2e/work dir/release-1
+          create_workdir: "true"
+          script_stop: "true"
+          capture_stdout: "true"
+          files: |
+            ${{ runner.temp }}/ssh-action-e2e/files/app
+            ${{ runner.temp }}/ssh-action-e2e/files/dist/*.txt
+          script: |
+            printf 'pwd=%s\n' "$(pwd)"
+            test -x app/deploy.sh
+            test ! -x app/config.txt
+            grep -qxF 'mode=production' app/config.txt
+            ./app/deploy.sh
+            grep -qxF 'one' one.txt
+            grep -qxF 'two' two.txt
+            printf 'files ok\n'
+
+      - name: Check the files run
+        env:
+          STDOUT: ${{ steps.files.outputs.stdout }}
+        run: |
+          set -eu
+          printf '%s\n' "$STDOUT" | grep -qxF 'deployed v1'
+          printf '%s\n' "$STDOUT" | grep -qxF 'files ok'
+          pwd_line=$(printf '%s\n' "$STDOUT" | sed -n 's/^pwd=//p')
+          case $pwd_line in
+          */work\ dir/release-1) ;;
+          *)
+            printf 'the script ran in %q instead of the workdir\n' "$pwd_line" >&2
+            exit 1
+            ;;
+          esac
+
+      - name: Show the test server logs of a failed run
+        if: failure()
+        run: cat "$RUNNER_TEMP"/ssh-action-e2e/*.log || true
+
+      - name: Stop the test servers
+        if: always()
+        run: |
+          for pid_file in "$RUNNER_TEMP"/ssh-action-e2e/*.pid; do
+            [ -f "$pid_file" ] || continue
+            kill "$(cat "$pid_file")" 2>/dev/null || true
+          done
